@@ -575,7 +575,7 @@ ax3.set_xlim(start_xlim, end_xlim)
 plt.subplots_adjust(top=0.92, bottom=0.06, left=0.07, right=0.92, hspace=0.25)
 
 # Salvar e Exibir Imagem Final
-output_filename = 'bico_de_pato_top25_b3.png'
+output_filename = 'bico_de_pato_top20_b3.png'
 plt.savefig(output_filename, dpi=300, facecolor=fig.get_facecolor(), bbox_inches='tight')
 print(f"✅ Dashboard completo gerado com sucesso: {output_filename}")
 try:

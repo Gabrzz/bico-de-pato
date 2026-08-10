@@ -1,5 +1,4 @@
 # Ignorar arquivos temporários, imagens e backups
-*.png
 *.csv
 bkps/
 

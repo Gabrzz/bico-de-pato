@@ -2,6 +2,25 @@
 
 Este repositório contém o script em Python para análise fundamentalista e quantitativa da tese de **Compressão de Múltiplos e Desconexão Operacional ("Efeito Bico de Pato")** nas empresas listadas na B3 (Bolsa Brasileira).
 
+![Dashboard Bico de Pato - B3 Top 20](bico_de_pato_top20_b3.png)
+
+---
+
+## 🖼️ Descrição do Dashboard
+
+O gráfico gerado (`bico_de_pato_top20_b3.png`) é composto por dois painéis principais de análise:
+
+### 1. Painel Superior — Desconexão Operacional vs. Preço (Efeito "Bico de Pato")
+- **Curva Verde (EBITDA LTM Consolidado Ex-Commodities):** Mostra a evolução acumulada do resultado operacional das 20 empresas selecionadas da B3 (rebased = 100 em Jan/2021). Revela um crescimento operacional consistente e resiliente da economia real.
+- **Curva Azul (Ibovespa / Cotação Relativa):** Representa a performance do índice Ibovespa no mesmo período.
+- **Área de Sombreamento ("Bico de Pato"):** Destaca visualmente o descolamento onde o desempenho operacional sobe enquanto o mercado precifica os ativos para baixo, criando uma nítida janela de compressão de múltiplos.
+- **Linha Vermelha Tracejada (Taxa Real NTN-B 10Y):** Ilustra o impacto da elevação dos juros reais no Brasil sobre a precificação dos ativos de risco.
+
+### 2. Painel Inferior — Múltiplos de Valuation e Métricas Complementares
+- **EV/EBITDA Médio Consolidado:** Mede a evolução do múltiplo de firma ao longo do tempo, evidenciando o desconto atual frente às médias históricas.
+- **Earnings Yield vs. NTN-B:** Compara o retorno de lucros da carteira de ações contra a taxa de juros real livre de risco.
+- **Métrica de Difusão da Tese:** Mede a porcentagem exata de empresas do universo analisado que confirmam individualmente o padrão de descolamento operacional.
+
 ---
 
 ## 💡 A Tese de Investimento
@@ -14,16 +33,14 @@ A divergência entre o fundamento operacional crescente e a cotação cadente ab
 
 ---
 
-## 📊 Principais Recursos do Script
+## 📊 Universo de Amostra (20 Empresas B3)
 
-- **Universo de 20 Empresas Não-Financeiras da B3:** Divididas entre líderes de commodities (`PETR4`, `VALE3`) e cestas de ex-commodities (`WEGE3`, `RENT3`, `EGIE3`, `ABEV3`, `EQTL3`, `LREN3`, `RADL3`, `SBSP3`, `EMBR3`, etc.).
-- **Coleta e Ajustes Dinâmicos:** 
-  - Cálculo do número de ações em circulação (*Shares Outstanding*) dinâmico com séries históricas via `yfinance` (com fallbacks e retries).
-  - Cálculo de EV (Enterprise Value) = *Market Cap* + Dívida Líquida.
-- **Painéis do Dashboard:**
-  - **Painel Superior:** Comparativo de evolução do EBITDA Consolidado Ex-Commodities vs. Ibovespa com overlays de taxas de juros reais (NTN-B 10Y).
-  - **Painel Inferior:** Análise de múltiplos históricos (EV/EBITDA), Earnings Yield vs NTN-B e estatísticas de difusão da tese de descolamento operacional.
-- **Saída Gráfica:** Gera automaticamente o dashboard visual em alta resolução (`bico_de_pato_top25_b3.png`).
+O script analisa 20 grandes empresas não-financeiras brasileiras divididas nos seguintes setores:
+- **Commodities & Materiais (Líderes):** `PETR4`, `VALE3`
+- **Utilidades Públicas (Energia & Saneamento):** `ELET3`, `EQTL3`, `CPLE6`, `SBSP3`, `EGIE3`
+- **Consumo, Varejo & Saúde:** `ABEV3`, `MGLU3`, `LREN3`, `RADL3`, `HAPV3`
+- **Bens de Capital & Transporte:** `WEGE3`, `RENT3`, `RAIL3`, `EMBR3`
+- **Materiais Ex-Líderes:** `GGBR4`, `CSNA3`, `SUZB3`, `JBSS3`
 
 ---
 
@@ -46,7 +63,7 @@ Execute o script diretamente pelo terminal:
 python script.py
 ```
 
-O script irá coletar as cotações históricas, alinhar as demonstrações financeiras e gerar o arquivo de imagem `bico_de_pato_top25_b3.png` na raiz do projeto.
+O script irá coletar as cotações históricas via `yfinance`, calcular os demonstrativos alinhados e salvar a imagem `bico_de_pato_top20_b3.png` na raiz do projeto.
 
 ---
 
@@ -54,8 +71,9 @@ O script irá coletar as cotações históricas, alinhar as demonstrações fina
 
 ```text
 .
-├── script.py         # Código-fonte principal da análise e geração do dashboard
-└── README.md         # Documentação completa do projeto
+├── script.py                 # Código-fonte principal da análise e geração do dashboard
+├── bico_de_pato_top20_b3.png # Dashboard visual gerado em alta resolução
+└── README.md                 # Documentação completa do projeto
 ```
 
 ---
