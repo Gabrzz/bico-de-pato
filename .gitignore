@@ -1,0 +1,18 @@
+# Ignorar arquivos temporários, imagens e backups
+*.png
+*.csv
+bkps/
+
+# Python & Ambientes
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# IDE & Sistema Operacional
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
