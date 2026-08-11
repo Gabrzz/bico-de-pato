@@ -91,10 +91,13 @@ O script baixa as cotações, combina com os dados fundamentalistas, calcula tud
 ---
 
 ## Estrutura do repositório
+
+```text
 .
 ├── script.py
 ├── bico_de_pato_top20_b3.png
 └── README.md
+```
 
 ---
 
