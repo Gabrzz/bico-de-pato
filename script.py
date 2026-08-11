@@ -259,7 +259,8 @@ else:
     ibov_simulated = [118873, 110035, 116634, 120891, 126216, 126802, 121801, 118780, 111037, 103500, 101915, 104822,
                       112143, 113161, 119999, 110526, 108335, 118082, 120187, 115742, 116560, 113143, 125666, 134185,
                       128159, 129020, 128158, 125924, 122098, 123906, 127652, 136000, 132000, 129000, 126000, 128500, 131000, 133500]
-    ibov_monthly = pd.Series(ibov_simulated[:len(ibov_dates)], index=ibov_dates)
+    s_temp = pd.Series(ibov_simulated, index=pd.date_range(start=START_DATE, periods=len(ibov_simulated), freq='ME'))
+    ibov_monthly = s_temp.reindex(ibov_dates).interpolate(method='linear').bfill().ffill()
 
 full_dates = ibov_monthly.index
 
