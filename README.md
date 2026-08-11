@@ -88,12 +88,46 @@ python script.py
 
 O script baixa as cotações, combina com os dados fundamentalistas, calcula tudo e salva a imagem bico_de_pato_top20_b3.png na raiz do projeto.
 
-## Estrutura do repositório
+---
 
+## Estrutura do repositório
+.
 ├── script.py
 ├── bico_de_pato_top20_b3.png
 └── README.md
 
+---
+
 ## Licença
 
 Projeto aberto para fins educacionais e de estudo sobre análise quantitativa e fundamentalista da B3.
+
+---
+
+## 🤖 Quer entender melhor este repositório?
+
+Clique em uma das IAs abaixo. Ela já abre com um prompt pronto pedindo para ler o README e o código. Depois é só perguntar o que quiser.
+
+<p align="center">
+  <a href="https://claude.ai/new?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas.">
+    <img src="https://img.shields.io/badge/Claude-Perguntar%20sobre%20o%20repo-FF6B35?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
+  </a>
+  &nbsp;
+  <a href="https://chatgpt.com/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas.">
+    <img src="https://img.shields.io/badge/ChatGPT-Perguntar%20sobre%20o%20repo-10A37F?style=for-the-badge&logo=openai&logoColor=white" alt="ChatGPT">
+  </a>
+  &nbsp;
+  <a href="https://gemini.google.com/app?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas.">
+    <img src="https://img.shields.io/badge/Gemini-Perguntar%20sobre%20o%20repo-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://chat.deepseek.com/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas.">
+    <img src="https://img.shields.io/badge/DeepSeek-Perguntar%20sobre%20o%20repo-4D6BFE?style=for-the-badge&logoColor=white" alt="DeepSeek">
+  </a>
+  &nbsp;
+  <a href="https://kimi.moonshot.cn/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas.">
+    <img src="https://img.shields.io/badge/Kimi-Perguntar%20sobre%20o%20repo-000000?style=for-the-badge&logoColor=white" alt="Kimi">
+  </a>
+</p>
