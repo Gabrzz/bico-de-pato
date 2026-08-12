@@ -1,5 +1,7 @@
 # 📈 Bico de Pato — Teste Empírico de Desconexão Operacional na B3
 
+![Bico de Pato Dashboard](bico_de_pato_dashboard.png)
+
 Script em Python que testa, sem forçar resultado, a tese do **"Bico de Pato"**: empresas não-financeiras da B3 cresceram operacionalmente (EBITDA LTM) enquanto o mercado comprimiu o múltiplo (EV/EBITDA), num cenário de juros reais mais altos (NTN-B IPCA+).
 
 A hipótese **não é assumida como verdadeira**. O código classifica de forma objetiva e auditável:
@@ -123,27 +125,22 @@ Aberto para estudo de valuation, séries temporais e quant da B3. Use, critique,
 
 ## Quer que uma IA explique o repo?
 
-Clique em qualquer uma. O prompt já vem pronto pedindo pra ler o README e o código. Depois é só perguntar o que quiser.
+Clique em qualquer botão abaixo para abrir a IA com o link do repositório (`https://github.com/Gabrzz/bico-de-pato`):
 
-```
-    <img src="https://img.shields.io/badge/Claude-Explicar%20o%20repo-FF6B35?style=for-the-badge&#x26;logo=anthropic&#x26;logoColor=white" alt="Claude">
-  
-   
-  
-    <img src="https://img.shields.io/badge/ChatGPT-Explicar%20o%20repo-10A37F?style=for-the-badge&#x26;logo=openai&#x26;logoColor=white" alt="ChatGPT">
-  
-   
-  
-    <img src="https://img.shields.io/badge/Gemini-Explicar%20o%20repo-4285F4?style=for-the-badge&#x26;logo=google&#x26;logoColor=white" alt="Gemini">
-  
-
-
-  
-    <img src="https://img.shields.io/badge/DeepSeek-Explicar%20o%20repo-4D6BFE?style=for-the-badge&#x26;logoColor=white" alt="DeepSeek">
-  
-   
-  
-    <img src="https://img.shields.io/badge/Kimi-Explicar%20o%20repo-000000?style=for-the-badge&#x26;logoColor=white" alt="Kimi">
-  
-
-```
+<p align="left">
+  <a href="https://claude.ai/new?q=Explique+o+reposit%C3%B3rio+https%3A%2F%2Fgithub.com%2FGabrzz%2Fbico-de-pato" target="_blank">
+    <img src="https://img.shields.io/badge/Claude-Explicar%20o%20repo-FF6B35?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
+  </a>
+  <a href="https://chatgpt.com/?q=Explique+o+reposit%C3%B3rio+https%3A%2F%2Fgithub.com%2FGabrzz%2Fbico-de-pato" target="_blank">
+    <img src="https://img.shields.io/badge/ChatGPT-Explicar%20o%20repo-10A37F?style=for-the-badge&logo=openai&logoColor=white" alt="ChatGPT">
+  </a>
+  <a href="https://gemini.google.com/app" target="_blank">
+    <img src="https://img.shields.io/badge/Gemini-Explicar%20o%20repo-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini">
+  </a>
+  <a href="https://chat.deepseek.com/" target="_blank">
+    <img src="https://img.shields.io/badge/DeepSeek-Explicar%20o%20repo-4D6BFE?style=for-the-badge&logoColor=white" alt="DeepSeek">
+  </a>
+  <a href="https://kimi.moonshot.cn/" target="_blank">
+    <img src="https://img.shields.io/badge/Kimi-Explicar%20o%20repo-000000?style=for-the-badge&logoColor=white" alt="Kimi">
+  </a>
+</p>
