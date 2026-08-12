@@ -61,18 +61,25 @@ Nada de “ajustar premissa pra ficar bonito”.
 
 2. **Limitações honestas do yfinance gratuito**  
    - EBITDA LTM trimestral só funciona bem nos últimos 4–5 trimestres. Antes disso usa anual ou fallback hardcoded auditado.  
-   - Não tem `announcement_date` da CVM → períodos anuais ficam marcados com `LOOK_AHEAD_RISK = TRUE` no CSV de qualidade.
+   - Não tem `announcement_date` da CVM → publication_dates são estimativas (~75 dias após period_end_date).
 
-3. **Sem extrapolação cega**  
+3. **Point-in-Time / Look-Ahead Bias Correction**  
+   Cada dado fundamental possui `publication_date` estimada. O cálculo de EV/EBITDA em uma data T só usa dados com `publication_date <= T`.  
+   - Dados sem `publication_date` recebem `lookahead_flag = UNKNOWN`  
+   - Observações com risco de look-ahead são excluídas da análise principal  
+   - O arquivo `lookahead_audit.csv` permite verificação manual de cada observação  
+   - Os dados hardcoded originais são **preservados** — apenas recebem metadados temporais
+
+4. **Sem extrapolação cega**  
    NTN-B, Ibovespa e preços só usam datas em que realmente existem dados. O período da análise é a interseção comum.
 
-4. **Sem filtro arbitrário de múltiplo**  
+5. **Sem filtro arbitrário de múltiplo**  
    EV/EBITDA > 100x não é jogado fora. Os dados ficam raw; a robustez vem da mediana + P25/P75.
 
-5. **Mediana + Agregado econômico**  
+6. **Mediana + Agregado econômico**  
    Mediana evita distorção de outliers. Agregado (`ΣEV / ΣEBITDA`) respeita o peso econômico real.
 
-6. **Assertions matemáticas**  
+7. **Assertions matemáticas**  
    Antes de plotar, o script confere:
    - `EV ≈ Market Cap + Net Debt`
    - `EV/EBITDA ≈ EV / EBITDA`  
@@ -80,30 +87,68 @@ Nada de “ajustar premissa pra ficar bonito”.
 
 ---
 
-## Os 8 CSVs de auditoria
+## Os CSVs de auditoria
 
 O script sempre gera:
 
 1. `bico_de_pato_company_metrics.csv` — crescimento e flag `Bico_de_Pato` por empresa  
 2. `bico_de_pato_sector_metrics.csv` — por setor  
-3. `bico_de_pato_summary.csv` — resumo executivo + classificação final  
-4. `bico_de_pato_data_quality.csv` — fontes, Look-Ahead Risk, EV negativo  
-5. `bico_de_pato_raw_data.csv` — séries mensais completas  
+3. `bico_de_pato_summary.csv` — resumo executivo + classificação final + metodologia PIT  
+4. `bico_de_pato_data_quality.csv` — fontes, Look-Ahead Risk, PIT summary, EV negativo  
+5. `bico_de_pato_raw_data.csv` — séries mensais completas (inclui `Lookahead_Flag` por ticker)  
 6. `bico_de_pato_bico_diffusion.csv` — % de empresas com EBITDA↑, múltiplo↓ e Bico ao longo do tempo  
 7. `bico_de_pato_macro_correlation.csv` — correlação NTN-B vs yields/múltiplos  
-8. `bico_de_pato_sample_comparison.csv` — comparativo das 3 amostras
+8. `bico_de_pato_sample_comparison.csv` — comparativo das 3 amostras  
+9. `lookahead_audit.csv` — **trilha de auditoria Point-in-Time** com `ticker`, `observation_date`, `metric`, `period_end_date`, `publication_date`, `value`, `source`, `data_source_type`, `lookahead_flag`  
+10. `included_companies.csv` — empresas candidatas aprovadas na amostragem efetiva (`ticker`, `company_name`, `sector`, `status`)  
+11. `excluded_companies.csv` — empresas descartadas por insuficiência de dados (`ticker`, `company_name`, `sector`, `status`, `exclusion_reason`, `details`)  
+12. `collection_errors.csv` — registro de exceções durante a coleta do yfinance (`ticker`, `stage`, `error_type`, `error_message`, `timestamp`)  
+13. `sample_audit.csv` — trilha unificada de auditoria da amostragem (`ticker`, `company_name`, `sector`, `candidate`, `included`, `exclusion_reason`, `data_quality`)  
+14. `bico_de_pato_statistical_report.txt` — **relatório de inferência estatística** com Intervalo de Confiança Bootstrap (95%), p-valores do Teste Binomial, Teste t pareado e teste ADF de estacionariedade
+
+---
+
+## Rigor Estatístico & Validação de Hipótese
+
+Além do alinhamento temporal Point-in-Time, o repositório inclui módulo dedicado de inferência estatística (`bico_stats.py`):
+
+- **Intervalo de Confiança Bootstrap (95%)**: Estimativa não-paramétrica por reamostragem (10.000 iterações) para a variação mediana do EBITDA, compressão de EV/EBITDA e difusão do Bico de Pato.
+- **Teste Binomial de Difusão**: Avaliação de significância da proporção de empresas com o padrão Bico de Pato simultâneo versus o acaso ($H_0: p = 0.5$).
+- **Teste t Pareado**: Teste de hipótese para alteração média dos múltiplos e fundamentos operacionais pré e pós período.
+- **Teste ADF (Augmented Dickey-Fuller)**: Verificação de estacionariedade e ordenamento estatístico das séries temporais para evitar falsas correlações.
 
 ---
 
 ## Como rodar
 
 ```bash
-pip install pandas numpy yfinance matplotlib
+pip install pandas numpy yfinance matplotlib scipy statsmodels pytest
 python script.py
 ```
 
-Ele baixa preços reais, alinha fundamentos, valida, imprime o relatório no terminal, salva o PNG e os 8 CSVs.
-Lembrete de novo: a janela que abre com plt.show() pode ficar espremida e com legenda por cima do gráfico. Use só a imagem bico_de_pato_dashboard.png.
+Ele baixa preços reais, alinha fundamentos (com correção Point-in-Time), valida, imprime o relatório no terminal, salva o PNG, os CSVs e o relatório estatístico.  
+Lembrete de novo: a janela que abre com `plt.show()` pode ficar espremida e com legenda por cima do gráfico. Use só a imagem `bico_de_pato_dashboard.png`.
+
+### Executar a suíte de testes automatizados:
+
+```bash
+pytest -v
+```
+
+---
+
+## Estrutura de módulos
+
+```
+script.py              # Pipeline principal — orquestra coleta, cálculo, amostragem e dashboard
+candidate_universe.py  # Universo candidato com 100+ empresas não-financeiras da B3
+point_in_time.py       # Framework Point-in-Time: FundamentalRecord, FundamentalStore
+publication_dates.py   # Mapeamento de publication_date estimadas
+bico_stats.py          # Módulo estatístico: Bootstrap CI 95%, Teste Binomial, Teste t pareado, ADF
+test_point_in_time.py  # 6 testes automatizados de integridade PIT
+test_methodology.py    # Testes automatizados da metodologia e amostras
+test_expansion.py      # Testes automatizados da expansão de amostra e auditoria
+```
 
 ---
 

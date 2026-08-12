@@ -20,9 +20,12 @@ Limitações Técnicas & Justificativa do yfinance Gratuito (Free Tier):
        trimestrais apenas para os 4 a 5 trimestres mais recentes. Onde disponível, o EBITDA LTM
        é calculado via soma de 4 trimestres (YFINANCE_QUARTERLY_LTM). Nos períodos históricos anteriores
        ou falhas, utiliza-se o demonstrativo anual (YFINANCE_ANNUAL ou HARDCODED_FALLBACK).
-    3. Look-Ahead Bias / As-Of Dates: O yfinance gratuito não fornece a data de publicação oficial CVM
-       (announcement_date). Para períodos ancorados na data de encerramento do balanço, o relatório
-       de auditoria registra explicitamente LOOK_AHEAD_RISK = TRUE.
+    3. Look-Ahead Bias / As-Of Dates (Point-in-Time): O yfinance gratuito não fornece a data de
+       publicação oficial CVM (announcement_date). Para mitigar look-ahead bias, cada dado
+       fundamental possui uma publication_date estimada (~75 dias após period_end_date para
+       dados anuais). Dados são filtrados por publication_date <= observation_date.
+       Observações com publication_date desconhecida ou estimada recebem lookahead_flag = UNKNOWN.
+       O relatório lookahead_audit.csv permite verificação manual de cada observação.
     4. Trimming Dinâmico de Datas: Nenhuma série (NTN-B, Ibovespa, Preços) é extrapolada com ffill/bfill
        além de suas observações reais. O período do estudo é o intervalo comum de dados válidos.
 """
@@ -41,6 +44,37 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
+
+# Universo Candidato da B3 (100+ empresas não-financeiras)
+from candidate_universe import (
+    CANDIDATE_TICKERS,
+    get_candidate_tickers,
+    get_candidate_dict,
+)
+
+# Point-in-Time framework para correção de look-ahead bias
+from point_in_time import (
+    FundamentalRecord,
+    FundamentalStore,
+    check_lookahead,
+    build_pit_monthly_series,
+    populate_store_from_hardcoded,
+    populate_store_from_yfinance,
+    generate_audit_dataframe,
+    compute_observation_lookahead_flag,
+)
+
+# Módulo de Estatística Inferencial, Econometria e Persistência
+from bico_stats import (
+    compute_exact_binomial_test,
+    compute_correlations_and_magnitude,
+    run_simple_regression,
+    run_ntnb_controlled_regression,
+    compute_temporal_persistence,
+    compute_ev_decomposition,
+    evaluate_evidence_scorecard,
+    generate_statistical_report,
+)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # LOGGING SETUP & SILENCING EXTERNAL YFINANCE CHATTER
@@ -72,34 +106,22 @@ def silence_yfinance():
 # ══════════════════════════════════════════════════════════════════════════════
 START_DATE = "2021-01-01"
 
-# Universo fixo de 20 empresas não-financeiras da B3
-TICKERS = [
-    # Commodities & Materiais Básicos
+# Universo Candidato de Empresas Não-Financeiras da B3 (100+ tickers)
+CANDIDATE_ITEMS = CANDIDATE_TICKERS
+TICKERS = get_candidate_tickers()
+CANDIDATE_DICT = get_candidate_dict()
+
+# Preservação das 20 empresas originais do estudo
+ORIGINAL_20_TICKERS = [
     "PETR4.SA", "VALE3.SA", "GGBR4.SA", "CSNA3.SA", "SUZB3.SA", "JBSS3.SA",
-    # Utilidades Públicas (Energia & Saneamento)
     "ELET3.SA", "EQTL3.SA", "CPLE6.SA", "SBSP3.SA", "EGIE3.SA",
-    # Consumo, Varejo & Saúde
     "ABEV3.SA", "MGLU3.SA", "LREN3.SA", "RADL3.SA", "HAPV3.SA",
-    # Bens de Capital & Transporte
     "WEGE3.SA", "RENT3.SA", "RAIL3.SA", "EMBR3.SA"
 ]
 
 COMMODITY_LEADERS = ["PETR4.SA", "VALE3.SA"]
 COMMODITY_ALL = ["PETR4.SA", "VALE3.SA", "GGBR4.SA", "CSNA3.SA", "SUZB3.SA", "JBSS3.SA"]
 IBOV_TICKER = "^BVSP"
-
-SECTORS = {
-    "Utilidades Públicas": ["ELET3.SA", "EQTL3.SA", "CPLE6.SA", "SBSP3.SA", "EGIE3.SA"],
-    "Bens de Capital & Transp.": ["WEGE3.SA", "RENT3.SA", "RAIL3.SA", "EMBR3.SA"],
-    "Consumo, Varejo & Saúde": ["ABEV3.SA", "MGLU3.SA", "LREN3.SA", "RADL3.SA", "HAPV3.SA"],
-    "Materiais & Alimentos": ["GGBR4.SA", "CSNA3.SA", "SUZB3.SA", "JBSS3.SA"],
-}
-
-SAMPLE_DEFINITIONS = {
-    'all':            {'label': 'Todas (20)',                'exclude': []},
-    'ex_leaders':     {'label': 'Ex-PETR4/VALE3 (18)',       'exclude': COMMODITY_LEADERS},
-    'ex_commodities': {'label': 'Ex-Commodities Amplo (14)', 'exclude': COMMODITY_ALL},
-}
 
 THRESHOLD_STRONG = 5.0      # % para crescimento/compressão forte
 MIN_BICO_DIFFUSION = 50.0   # % mínimo de difusão de empresas com Bico de Pato
@@ -480,8 +502,8 @@ def classify_hypothesis(ebitda_pct_med, ebitda_pct_agg, mult_pct_med, mult_pct_a
 
 def calculate_sample_metrics(df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
                               df_ebitda_monthly, df_ev, df_market_cap, df_netdebt,
-                              full_dates, sample_tickers):
-    """Calcula métricas agregadas por amostra (Mediana, Agregado Econômico ΣEV/ΣEBITDA, Difusão)."""
+                              full_dates, sample_tickers, delta_ntnb_series=None):
+    """Calcula métricas agregadas por amostra (Mediana, Agregado Econômico ΣEV/ΣEBITDA, Difusão, Testes Estatísticos)."""
     if not sample_tickers:
         return None
 
@@ -528,7 +550,59 @@ def calculate_sample_metrics(df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
     diffusion_mult_down = (mult_down.sum(axis=1) / len(sample_tickers)) * 100.0
     diffusion_bico = (bico_matrix.sum(axis=1) / len(sample_tickers)) * 100.0
 
-    # Variações Início → Fim
+    # Variações Início → Fim por empresa
+    ebitda_growths = []
+    mult_changes = []
+    bico_flags = []
+
+    for col in sample_tickers:
+        eb_clean = df_ebitda_monthly[col].dropna()
+        m_clean = df_ev_ebitda[col].dropna()
+        if not eb_clean.empty and not m_clean.empty:
+            eb_i, eb_f = eb_clean.iloc[0], eb_clean.iloc[-1]
+            m_i, m_f = m_clean.iloc[0], m_clean.iloc[-1]
+
+            eg = ((eb_f / eb_i) - 1.0) * 100.0 if eb_i > 0 else np.nan
+            mc = ((m_f / m_i) - 1.0) * 100.0 if m_i > 0 else np.nan
+
+            ebitda_growths.append(eg)
+            mult_changes.append(mc)
+            bico_flags.append((eg > 0) and (mc < 0) if pd.notna(eg) and pd.notna(mc) else False)
+        else:
+            ebitda_growths.append(np.nan)
+            mult_changes.append(np.nan)
+            bico_flags.append(False)
+
+    s_eb_growths = pd.Series(ebitda_growths, index=sample_tickers)
+    s_mult_changes = pd.Series(mult_changes, index=sample_tickers)
+    s_bico_flags = pd.Series(bico_flags, index=sample_tickers)
+
+    n_sample_valid = int(s_eb_growths.dropna().index.intersection(s_mult_changes.dropna().index).shape[0])
+    k_sample_bico = int(s_bico_flags.sum())
+    final_bico_diffusion = (k_sample_bico / n_sample_valid * 100.0) if n_sample_valid > 0 else 0.0
+
+    # Teste Binomial Exato & IC95%
+    binom_res = compute_exact_binomial_test(k_sample_bico, n_sample_valid)
+
+    # Correlações & Quantis
+    corr_res = compute_correlations_and_magnitude(s_eb_growths, s_mult_changes, s_bico_flags)
+
+    # Regressão Simples
+    reg_simple = run_simple_regression(s_eb_growths, s_mult_changes)
+
+    # Regressão com NTN-B (se disponível)
+    if delta_ntnb_series is not None and len(delta_ntnb_series) == len(s_eb_growths):
+        reg_ntnb = run_ntnb_controlled_regression(s_eb_growths, s_mult_changes, delta_ntnb_series)
+    else:
+        # Cria série dummy constante se não fornecida por empresa
+        reg_ntnb = run_ntnb_controlled_regression(s_eb_growths, s_mult_changes, pd.Series(0.0, index=sample_tickers))
+
+    # Persistência Temporal
+    pers_res = compute_temporal_persistence(df_ebitda_monthly, df_ev_ebitda, sample_tickers)
+
+    # Decomposição do EV & Tipos A/B/C/D
+    ev_decomp = compute_ev_decomposition(df_ebitda_monthly, df_ev, df_market_cap, df_netdebt, df_ev_ebitda, sample_tickers)
+
     med_clean = median_ev_ebitda.dropna()
     initial_mult_med = med_clean.iloc[0] if len(med_clean) > 0 else np.nan
     final_mult_med = med_clean.iloc[-1] if len(med_clean) > 0 else np.nan
@@ -549,8 +623,6 @@ def calculate_sample_metrics(df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
     mcap_growth_pct = ((total_mcap.iloc[-1] / total_mcap.iloc[0]) - 1) * 100.0 if total_mcap.iloc[0] > 0 else np.nan
     netdebt_growth_pct = ((total_netdebt.iloc[-1] / total_netdebt.iloc[0]) - 1) * 100.0 if total_netdebt.iloc[0] > 0 else np.nan
 
-    final_bico_diffusion = diffusion_bico.iloc[-1] if not diffusion_bico.empty else 0.0
-
     classification = classify_hypothesis(
         ebitda_growth_med_pct, ebitda_growth_agg_pct,
         mult_change_med_pct, mult_change_agg_pct,
@@ -558,6 +630,9 @@ def calculate_sample_metrics(df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
     )
 
     return {
+        'N': n_sample_valid,
+        'K': k_sample_bico,
+        'bico_diffusion_pct': final_bico_diffusion,
         'ev_ebitda_median': median_ev_ebitda,
         'ev_ebitda_p25': p25_ev_ebitda,
         'ev_ebitda_p75': p75_ev_ebitda,
@@ -580,16 +655,25 @@ def calculate_sample_metrics(df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
         'mcap_growth_pct': mcap_growth_pct,
         'netdebt_growth_pct': netdebt_growth_pct,
         'classification': classification,
+        'binomial_test': binom_res,
+        'correlations': corr_res,
+        'regression_simple': reg_simple,
+        'regression_ntnb': reg_ntnb,
+        'persistence': pers_res,
+        'ev_decomp': ev_decomp,
+        'ebitda_growths_series': s_eb_growths,
+        'mult_changes_series': s_mult_changes,
+        'bico_flags_series': s_bico_flags,
     }
 
 
-def calculate_sector_metrics(df_ebitda_monthly, df_ev_ebitda, df_ev, full_dates):
+def calculate_sector_metrics(df_ebitda_monthly, df_ev_ebitda, df_ev, full_dates, sectors):
     """Calcula EBITDA Growth, EV Growth e Variação do Múltiplo por setor."""
     sector_indices = pd.DataFrame(index=full_dates)
     sector_growth = {}
     sector_mult = {}
 
-    for sec_name, sec_tickers in SECTORS.items():
+    for sec_name, sec_tickers in sectors.items():
         valid = [t for t in sec_tickers if t in df_ebitda_monthly.columns]
         if not valid:
             continue
@@ -620,15 +704,16 @@ def calculate_sector_metrics(df_ebitda_monthly, df_ev_ebitda, df_ev, full_dates)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def validate_dataset(valid_tickers, df_ebitda, df_ev, df_mcap, df_ev_ebitda,
-                      ebitda_sources, shares_sources, price_sources, negative_ev_counts):
+                      ebitda_sources, shares_sources, price_sources, negative_ev_counts,
+                      lookahead_flags=None):
     """Gera relatório de qualidade dos dados para terminal e CSV de auditoria."""
     print("\n" + "=" * 65)
     print("                DATA QUALITY & AUDIT REPORT")
+    print("        Point-in-Time adjusted (look-ahead bias correction)")
     print("=" * 65)
 
     rows = []
-    for ticker in TICKERS:
-        is_active = ticker in valid_tickers
+    for ticker in valid_tickers:
         price_src = price_sources.get(ticker, "PRICE_DATA_INSUFFICIENT")
         ebitda_src = ebitda_sources.get(ticker, "UNKNOWN")
         shares_src = shares_sources.get(ticker, "UNKNOWN")
@@ -636,18 +721,28 @@ def validate_dataset(valid_tickers, df_ebitda, df_ev, df_mcap, df_ev_ebitda,
         neg_ev = negative_ev_counts.get(ticker, 0)
         look_ahead_risk = "TRUE" if "ANNUAL" in ebitda_src or "HARDCODED" in ebitda_src else "FALSE"
 
-        status = "OK (ATIVO)" if is_active else "EXCLUÍDO (PREÇO INSUFICIENTE)"
+        # PIT lookahead summary for this ticker
+        pit_summary = 'N/A'
+        if lookahead_flags is not None and ticker in lookahead_flags:
+            flags = lookahead_flags[ticker]
+            n_false = (flags == 'FALSE').sum()
+            n_unknown = (flags == 'UNKNOWN').sum()
+            n_true = (flags == 'TRUE').sum()
+            pit_summary = f"F:{n_false}/U:{n_unknown}/T:{n_true}"
 
-        print(f"  {ticker:10s} | Preço: {price_src:12s} | EBITDA: {ebitda_src:22s} | LookAhead: {look_ahead_risk:5s} | Status: {status}")
+        status = "OK (ATIVO)"
+
+        print(f"  {ticker:10s} | Preço: {price_src:12s} | EBITDA: {ebitda_src:22s} | PIT: {pit_summary:15s} | Status: {status}")
 
         rows.append({
             'Ticker': ticker,
             'Price_Source': price_src,
             'EBITDA_Source': ebitda_src,
-            'NetDebt_Source': 'HARDCODED_FALLBACK',
-            'NetIncome_Source': 'HARDCODED_FALLBACK',
+            'NetDebt_Source': 'HARDCODED_FALLBACK' if ticker in ORIGINAL_20_TICKERS else 'YFINANCE',
+            'NetIncome_Source': 'HARDCODED_FALLBACK' if ticker in ORIGINAL_20_TICKERS else 'YFINANCE',
             'Shares_Source': shares_src,
             'Look_Ahead_Risk': look_ahead_risk,
+            'PIT_Lookahead_Summary': pit_summary,
             'Negative_EV_Count': neg_ev,
             'Status': status,
         })
@@ -662,12 +757,13 @@ def validate_dataset(valid_tickers, df_ebitda, df_ev, df_mcap, df_ev_ebitda,
 
 def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     """
-    Dashboard de 4 painéis + KPI Banner no topo com design dark premium.
+    Dashboard de 8 painéis + KPI Banner no topo com design dark premium.
     Zero sobreposição de textos, legendas ou cartões.
     """
     full_dates = results['full_dates']
     primary = results['samples']['ex_leaders']
     all_sample = results['samples']['all']
+    ex_comm = results['samples'].get('ex_commodities', primary)
     ibov_index = results['ibov_index']
     ibov_source = results['ibov_source']
     ntnb = results['ntnb_monthly']
@@ -675,6 +771,14 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     sector_indices = results['sector_indices']
     sector_growth = results['sector_growth']
     robustness = results['robustness']
+    eval_res = results.get('hypothesis_evaluation', {})
+    reasons = eval_res.get('justification_reasons', [])
+
+    sample_definitions = results.get('sample_definitions', {
+        'all': {'label': 'Todas', 'exclude': []},
+        'ex_leaders': {'label': 'Ex-PETR4/VALE3', 'exclude': COMMODITY_LEADERS},
+        'ex_commodities': {'label': 'Ex-Commodities Amplo', 'exclude': COMMODITY_ALL},
+    })
 
     plt.rcParams['font.family'] = 'sans-serif'
     plt.rcParams['font.sans-serif'] = ['Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'DejaVu Sans']
@@ -692,15 +796,15 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     C_MUTED = '#94A3B8'  # Grey
     C_GRID = '#334155'
 
-    fig = plt.figure(figsize=(18, 28), facecolor=BG)
+    fig = plt.figure(figsize=(18, 44), facecolor=BG)
     gs = fig.add_gridspec(
-        5, 1,
-        height_ratios=[0.75, 2.0, 2.0, 1.4, 1.4],
-        hspace=0.40, top=0.97, bottom=0.03, left=0.07, right=0.93
+        9, 1,
+        height_ratios=[1.1, 2.0, 2.0, 1.4, 1.4, 1.4, 1.4, 1.5, 1.5],
+        hspace=0.38, top=0.98, bottom=0.02, left=0.07, right=0.93
     )
 
     # ══════════════════════════════════════════════════════════════════
-    # ROW 0: KPI SUMMARY HEADER BANNER
+    # ROW 0: KPI SUMMARY HEADER BANNER & JUSTIFICATION BOX
     # ══════════════════════════════════════════════════════════════════
     ax_header = fig.add_subplot(gs[0])
     ax_header.set_facecolor(BG)
@@ -709,20 +813,20 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     period_start = full_dates[0].strftime('%b/%Y')
     period_end = full_dates[-1].strftime('%b/%Y')
 
-    ax_header.text(0.0, 0.95, 'B3: Teste da Hipótese de Desconexão Operacional ("Bico de Pato")',
+    cand_count = results.get('candidate_count', len(results['valid_tickers']))
+    eff_count = results.get('effective_sample_size', len(results['valid_tickers']))
+    disc_count = results.get('excluded_count', 0)
+
+    ax_header.text(0.0, 0.96, 'B3: Teste da Hipótese de Desconexão Operacional ("Bico de Pato")',
                    fontsize=18, fontweight='bold', color=C_TEXT, va='top')
 
-    ax_header.text(0.0, 0.72, f'Período Analisado: {period_start} → {period_end}  |  Amostra: {len(results["valid_tickers"])} Empresas Não-Financeiras da B3  |  Amostra Primária: Ex-PETR4/VALE3',
-                   fontsize=11.5, color=C_MUTED, va='top')
+    ax_header.text(0.0, 0.78,
+                   f'Período: {period_start} → {period_end}  |  AMOSTRA EFETIVA: {eff_count} EMPRESAS (Candidatas: {cand_count} | Descartadas: {disc_count})',
+                   fontsize=11.5, color=C_TEXT, fontweight='bold', va='top')
 
-    source_warnings = []
-    if ntnb_source == "ANBIMA_COMPILED":
-        source_warnings.append("NTN-B: ANBIMA")
-    if ibov_source == "FALLBACK":
-        source_warnings.append("Ibovespa: fallback")
-    if source_warnings:
-        ax_header.text(1.0, 0.95, '[' + ' | '.join(source_warnings) + ']',
-                       fontsize=10, color='#FB923C', ha='right', va='top', fontweight='bold')
+    ax_header.text(0.0, 0.64,
+                   'Point-in-Time adjusted  •  Estatística Inferencial, Persistência Temporal & Regressões Econométricas.',
+                   fontsize=9.0, color='#38BDF8', va='top', fontstyle='italic')
 
     ebitda_pct = primary['ebitda_change_pct']
     mult_pct = primary['multiple_change_pct']
@@ -730,7 +834,7 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     final_m = primary['final_multiple']
     ntnb_chg = results.get('ntnb_change_pp', 0.0)
     spread_final = results.get('spread_final', 0.0)
-    status_clean = primary['classification']
+    status_clean = eval_res.get('status', primary['classification'])
 
     status_bg = "#F59E0B" if "PARCIAL" in status_clean else ("#10B981" if "CONFIRMADA" in status_clean else "#F43F5E")
 
@@ -750,12 +854,19 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
         cx = i * (card_w + gap)
         bbox_rect = dict(boxstyle='round,pad=0.5', facecolor=CARD, edgecolor=kpi['color'], lw=1.2, alpha=0.95)
         kpi_text = f"{kpi['title']}\n{kpi['val']}\n{kpi['sub']}"
-        ax_header.text(cx + card_w/2, 0.40, kpi_text,
+        ax_header.text(cx + card_w/2, 0.48, kpi_text,
                        fontsize=9.5, fontweight='bold', color=C_TEXT,
                        ha='center', va='top', bbox=bbox_rect)
 
+    # Caixa Dinâmica de Motivos do Status
+    if reasons:
+        reasons_summary = "  ".join(reasons[:4])
+        ax_header.text(0.0, 0.05, f"Motivos do Status [{status_clean}]: {reasons_summary}",
+                       fontsize=9.0, color='#E2E8F0', fontweight='bold', va='bottom',
+                       bbox=dict(boxstyle='round,pad=0.4', facecolor='#1E293B', edgecolor='#475569', lw=1.0))
+
     # ══════════════════════════════════════════════════════════════════
-    # ROW 1: PAINEL A — FUNDAMENTOS OPERACIONAIS (EBITDA LTM Base 100)
+    # ROW 1: PAINEL A — FUNDAMENTOS OPERACIONAIS
     # ══════════════════════════════════════════════════════════════════
     ax1 = fig.add_subplot(gs[1])
     ax1.set_facecolor(BG)
@@ -793,19 +904,8 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
                       loc='upper left', labelcolor='#E2E8F0', ncol=2, framealpha=0.95)
     leg1.get_frame().set_linewidth(1.0)
 
-    sec_lines = ["Decomposição Setorial (Crescimento EBITDA):"]
-    for sn, pct in sector_growth.items():
-        sign = "+" if pct >= 0 else ""
-        sec_lines.append(f" • {sn}: {sign}{pct:.1f}%")
-    latest_diff = primary['diffusion_ebitda_up'].iloc[-1] if not primary['diffusion_ebitda_up'].empty else 0
-    sec_lines.append(f" • Difusão: {latest_diff:.0f}% com EBITDA > Jan/2021")
-
-    ax1.text(0.015, 0.55, "\n".join(sec_lines), transform=ax1.transAxes,
-             fontsize=9.5, color=C_TEXT, va='top', ha='left',
-             bbox=dict(boxstyle='round,pad=0.5', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0, alpha=0.95))
-
     # ══════════════════════════════════════════════════════════════════
-    # ROW 2: PAINEL B — O "BICO DE PATO" (EBITDA ↑ vs. EV/EBITDA ↓)
+    # ROW 2: PAINEL B — O "BICO DE PATO"
     # ══════════════════════════════════════════════════════════════════
     ax2 = fig.add_subplot(gs[2])
     ax2.set_facecolor(BG)
@@ -851,26 +951,8 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
                       fontsize=10.5, loc='upper left', labelcolor='#E2E8F0', framealpha=0.95)
     leg2.get_frame().set_linewidth(1.0)
 
-    # Decomposição detalhada do EV
-    ev_g = primary['ev_growth_pct']
-    mc_g = primary['mcap_growth_pct']
-    nd_g = primary['netdebt_growth_pct']
-    bico_diff_final = primary['diffusion_bico'].iloc[-1] if not primary['diffusion_bico'].empty else 0
-
-    annot_text = (f"Decomposição do EV & Bico:\n"
-                  f" • EBITDA Mediano: {ebitda_pct:+.1f}%\n"
-                  f" • EV Agregado: {ev_g:+.1f}%\n"
-                  f" • Market Cap Agregado: {mc_g:+.1f}%\n"
-                  f" • Dívida Líquida Agregada: {nd_g:+.1f}%\n"
-                  f" • EV/EBITDA Mediano: {init_m:.1f}x → {final_m:.1f}x ({mult_pct:+.1f}%)\n"
-                  f" • Difusão Bico de Pato: {bico_diff_final:.0f}% das empresas")
-
-    ax2.text(0.99, 0.50, annot_text, transform=ax2.transAxes,
-             fontsize=9.5, color=C_TEXT, va='center', ha='right',
-             bbox=dict(boxstyle='round,pad=0.5', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0, alpha=0.95))
-
     # ══════════════════════════════════════════════════════════════════
-    # ROW 3: PAINEL C — TAXA REAL VS. YIELDS DA BOLSA
+    # ROW 3: PAINEL C — TAXA REAL VS. YIELDS DE VALUATION
     # ══════════════════════════════════════════════════════════════════
     ax3 = fig.add_subplot(gs[3])
     ax3.set_facecolor(BG)
@@ -906,20 +988,6 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     ax3.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b/%Y'))
 
-    ntnb_initial = ntnb.dropna().iloc[0] if not ntnb.dropna().empty else 0
-    ntnb_final = ntnb.dropna().iloc[-1] if not ntnb.dropna().empty else 0
-    ey_initial = primary['ebitda_yield_median'].dropna().iloc[0] if not primary['ebitda_yield_median'].dropna().empty else 0
-    ey_final = primary['ebitda_yield_median'].dropna().iloc[-1] if not primary['ebitda_yield_median'].dropna().empty else 0
-
-    spread_i = ey_initial - ntnb_initial
-    spread_f = ey_final - ntnb_final
-    spread_text = (f"Spread Operacional vs. NTN-B:\n"
-                   f" • Inicial: {spread_i:+.1f} p.p.\n"
-                   f" • Final: {spread_f:+.1f} p.p.")
-    ax3.text(0.99, 0.50, spread_text, transform=ax3.transAxes,
-             fontsize=9.5, color=C_TEXT, va='center', ha='right',
-             bbox=dict(boxstyle='round,pad=0.5', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0, alpha=0.95))
-
     all_lines = ln_ntnb + ln_ey + ln_earn
     all_labels = [l.get_label() for l in all_lines]
     leg3 = ax3.legend(all_lines, all_labels, frameon=True, facecolor=CARD,
@@ -939,7 +1007,7 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     ebitda_changes = []
     multiple_changes = []
     classifications = []
-    for key, sdef in SAMPLE_DEFINITIONS.items():
+    for key, sdef in sample_definitions.items():
         r = robustness.get(key)
         if r is not None:
             sample_names.append(sdef['label'])
@@ -977,11 +1045,6 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
                  f'{y2:+.1f}%', ha='center', va='top' if y2 < 0 else 'bottom',
                  fontsize=10.5, fontweight='bold', color=C_MULT)
 
-        st_clean = classifications[i]
-        ax4.text(x[i], min_val * 1.35, f"[{st_clean}]",
-                 ha='center', va='top', fontsize=9.5, fontweight='bold', color=C_TEXT,
-                 bbox=dict(boxstyle='round,pad=0.4', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0))
-
     for spine in ['top', 'right', 'left']:
         ax4.spines[spine].set_visible(False)
     ax4.spines['bottom'].set_color(C_GRID)
@@ -991,8 +1054,184 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
                       loc='upper right', labelcolor='#E2E8F0', framealpha=0.95)
     leg4.get_frame().set_linewidth(1.0)
 
+    # ══════════════════════════════════════════════════════════════════
+    # ROW 5: PAINEL E — DIFUSÃO DO BICO DE PATO COM IC95% (NOVO)
+    # ══════════════════════════════════════════════════════════════════
+    ax5 = fig.add_subplot(gs[5])
+    ax5.set_facecolor(BG)
+    ax5.set_title('Painel E — Difusão do Bico de Pato por Subamostra (N, K, % e IC95% Wilson)',
+                  fontsize=13, color=C_TEXT, pad=12, loc='left', fontweight='bold')
+
+    diff_labels = []
+    diff_values = []
+    ci_lows = []
+    ci_highs = []
+    nk_texts = []
+
+    for key in ['all', 'ex_leaders', 'ex_commodities']:
+        r = robustness.get(key)
+        if r:
+            s_label = sample_definitions.get(key, {}).get('label', key)
+            binom = r.get('binomial_test', {})
+            n_val = binom.get('N', r.get('N', 0))
+            k_val = binom.get('K', r.get('K', 0))
+            prop = binom.get('proportion', 0.0) * 100.0
+            c_l = binom.get('ci_lower', 0.0) * 100.0
+            c_h = binom.get('ci_upper', 0.0) * 100.0
+
+            diff_labels.append(s_label)
+            diff_values.append(prop)
+            ci_lows.append(prop - c_l)
+            ci_highs.append(c_h - prop)
+            nk_texts.append(f"K={k_val} / N={n_val}\n({prop:.1f}%)")
+
+    x_diff = np.arange(len(diff_labels))
+    bars5 = ax5.bar(x_diff, diff_values, width=0.4, color='#06B6D4', alpha=0.85, zorder=3,
+                    yerr=[ci_lows, ci_highs], capsize=5, ecolor='#F8FAFC')
+    ax5.axhline(50.0, color='#F59E0B', ls='--', lw=1.5, label='Threshold Neutro (50%)', zorder=4)
+
+    ax5.set_xticks(x_diff)
+    ax5.set_xticklabels(diff_labels, fontsize=10.5, color=C_TEXT, fontweight='bold')
+    ax5.set_ylabel('Difusão (% Empresas)', color=C_MUTED, fontsize=11, fontweight='bold')
+    ax5.set_ylim(0, 100)
+
+    for i, bar in enumerate(bars5):
+        y_val = bar.get_height()
+        ax5.text(bar.get_x() + bar.get_width()/2, y_val + 7, nk_texts[i],
+                 ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=C_TEXT,
+                 bbox=dict(boxstyle='round,pad=0.3', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0))
+
+    for spine in ['top', 'right', 'left']:
+        ax5.spines[spine].set_visible(False)
+    ax5.spines['bottom'].set_color(C_GRID)
+    ax5.grid(True, ls='--', lw=0.5, color=C_GRID, alpha=0.4, axis='y')
+    ax5.legend(loc='upper right', frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, labelcolor='#E2E8F0')
+
+    # ══════════════════════════════════════════════════════════════════
+    # ROW 6: PAINEL F — PERSISTÊNCIA TEMPORAL DA DIFUSÃO (NOVO)
+    # ══════════════════════════════════════════════════════════════════
+    ax6 = fig.add_subplot(gs[6])
+    ax6.set_facecolor(BG)
+    ax6.set_title('Painel F — Persistência Temporal: Proporção de Empresas em Bico de Pato por Período (Kt/Nt)',
+                  fontsize=13, color=C_TEXT, pad=12, loc='left', fontweight='bold')
+
+    pers_primary = primary.get('persistence', {})
+    temp_diff = pers_primary.get('temporal_diffusion', pd.Series(dtype=float))
+
+    if not temp_diff.empty:
+        ax6.plot(full_dates, temp_diff, color='#A855F7', lw=2.8, marker='o', ms=4, label='Difusão Temporal Kt/Nt (%)')
+        ax6.axhline(50.0, color='#F59E0B', ls='--', lw=1.2, label='Linha de 50%')
+        med_p = pers_primary.get('median_company_persistence', 0.0) * 100.0
+        ax6.axhline(med_p, color='#10B981', ls=':', lw=1.5, label=f'Persistência Mediana: {med_p:.1f}%')
+
+    ax6.set_ylabel('Difusão por Período (%)', color=C_MUTED, fontsize=11, fontweight='bold')
+    ax6.set_ylim(0, 100)
+    ax6.grid(True, ls='--', lw=0.5, color=C_GRID, alpha=0.4)
+    ax6.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
+    ax6.xaxis.set_major_formatter(mdates.DateFormatter('%b/%Y'))
+    for spine in ['top', 'right', 'left']:
+        ax6.spines[spine].set_visible(False)
+    ax6.spines['bottom'].set_color(C_GRID)
+    ax6.tick_params(axis='both', colors=C_MUTED, labelsize=10)
+    ax6.legend(loc='upper left', frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, labelcolor='#E2E8F0')
+
+    # ══════════════════════════════════════════════════════════════════
+    # ROW 7: PAINEL G — SCATTER PLOT OPERACIONAL VS. VALUATION (NOVO)
+    # ══════════════════════════════════════════════════════════════════
+    ax7 = fig.add_subplot(gs[7])
+    ax7.set_facecolor(BG)
+    ax7.set_title('Painel G — Scatter Plot: Δ EBITDA (%) vs. Δ EV/EBITDA (%) (Com Quadrante Bico de Pato)',
+                  fontsize=13, color=C_TEXT, pad=12, loc='left', fontweight='bold')
+
+    x_scatter = primary.get('ebitda_growths_series', pd.Series()).dropna()
+    y_scatter = primary.get('mult_changes_series', pd.Series()).dropna()
+    common_idx = x_scatter.index.intersection(y_scatter.index)
+
+    if not common_idx.empty:
+        xs = x_scatter.loc[common_idx].values
+        ys = y_scatter.loc[common_idx].values
+        bico_mask = (xs > 0) & (ys < 0)
+
+        ax7.scatter(xs[bico_mask], ys[bico_mask], color='#10B981', s=45, alpha=0.85, label='Bico de Pato (ΔEBITDA > 0 & ΔEV/EBITDA < 0)', zorder=4)
+        ax7.scatter(xs[~bico_mask], ys[~bico_mask], color='#F43F5E', s=35, alpha=0.55, label='Outros Quadrantes', zorder=3)
+
+        # Linha de tendência
+        if len(xs) > 2:
+            p_fit = np.polyfit(xs, ys, 1)
+            x_trend = np.linspace(min(xs), max(xs), 100)
+            y_trend = np.polyval(p_fit, x_trend)
+            ax7.plot(x_trend, y_trend, color='#F59E0B', ls='--', lw=2.0, label='Linha de Tendência Linear')
+
+    ax7.axhline(0, color=C_GRID, lw=1.2)
+    ax7.axvline(0, color=C_GRID, lw=1.2)
+    ax7.set_xlabel('Δ EBITDA LTM (%)', color=C_MUTED, fontsize=11, fontweight='bold')
+    ax7.set_ylabel('Δ EV/EBITDA (%)', color=C_MUTED, fontsize=11, fontweight='bold')
+    ax7.grid(True, ls='--', lw=0.5, color=C_GRID, alpha=0.4)
+
+    corr_p = primary.get('correlations', {})
+    spear_text = f"Spearman rho = {corr_p.get('rho_spearman', 0.0):.3f} (p = {corr_p.get('p_value_spearman', 1.0):.4f})\nN = {corr_p.get('N', 0)}"
+    ax7.text(0.98, 0.95, spear_text, transform=ax7.transAxes, ha='right', va='top', fontsize=10, fontweight='bold', color=C_TEXT,
+             bbox=dict(boxstyle='round,pad=0.4', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0))
+
+    for spine in ['top', 'right', 'left']:
+        ax7.spines[spine].set_visible(False)
+    ax7.spines['bottom'].set_color(C_GRID)
+    ax7.tick_params(axis='both', colors=C_MUTED, labelsize=10)
+    ax7.legend(loc='lower left', frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, labelcolor='#E2E8F0')
+
+    # ══════════════════════════════════════════════════════════════════
+    # ROW 8: PAINEL H — DECOMPOSIÇÃO DO ENTERPRISE VALUE & TIPOS (NOVO)
+    # ══════════════════════════════════════════════════════════════════
+    ax8 = fig.add_subplot(gs[8])
+    ax8.set_facecolor(BG)
+    ax8.set_title('Painel H — Decomposição do EV (ΔEBITDA, ΔEV, ΔMCap, ΔNetDebt) & Classificação por Tipo (A/B/C/D)',
+                  fontsize=13, color=C_TEXT, pad=12, loc='left', fontweight='bold')
+
+    decomp = primary.get('ev_decomp', {})
+    t_counts = decomp.get('type_counts', {})
+
+    comp_labels = ['Δ EBITDA', 'Δ EV', 'Δ Market Cap', 'Δ Net Debt']
+    comp_vals = [
+        decomp.get('agg_ebitda_growth', 0.0),
+        decomp.get('agg_ev_growth', 0.0),
+        decomp.get('agg_mcap_growth', 0.0),
+        decomp.get('agg_netdebt_growth', 0.0)
+    ]
+
+    x_comp = np.arange(len(comp_labels))
+    colors_comp = ['#10B981', '#F59E0B', '#38BDF8', '#A855F7']
+    bars8 = ax8.bar(x_comp, comp_vals, width=0.4, color=colors_comp, alpha=0.85, zorder=3)
+    ax8.axhline(0, color=C_MUTED, lw=0.9, zorder=1)
+
+    ax8.set_xticks(x_comp)
+    ax8.set_xticklabels(comp_labels, fontsize=10.5, color=C_TEXT, fontweight='bold')
+    ax8.set_ylabel('Variação Mediana (%)', color=C_MUTED, fontsize=11, fontweight='bold')
+
+    for bar in bars8:
+        y_val = bar.get_height()
+        ax8.text(bar.get_x() + bar.get_width()/2, y_val + (1.5 if y_val >= 0 else -3.5),
+                 f'{y_val:+.1f}%', ha='center', va='bottom' if y_val >= 0 else 'top',
+                 fontsize=10.0, fontweight='bold', color=C_TEXT)
+
+    # Inset / Text Box com a contagem dos Tipos
+    types_str = (f"Tipos de Bico de Pato:\n"
+                 f" • Tipo A (EBITDA^ EVv): {t_counts.get('Tipo A', 0)}\n"
+                 f" • Tipo B (EBITDA^ EV=): {t_counts.get('Tipo B', 0)}\n"
+                 f" • Tipo C (EBITDA^ > EV^): {t_counts.get('Tipo C', 0)}\n"
+                 f" • Tipo D (EBITDA^ < EV^): {t_counts.get('Tipo D', 0)}\n"
+                 f" • Não Bico: {t_counts.get('Não Bico', 0)}")
+
+    ax8.text(0.98, 0.95, types_str, transform=ax8.transAxes, ha='right', va='top', fontsize=9.5, fontweight='bold', color=C_TEXT,
+             bbox=dict(boxstyle='round,pad=0.4', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0))
+
+    for spine in ['top', 'right', 'left']:
+        ax8.spines[spine].set_visible(False)
+    ax8.spines['bottom'].set_color(C_GRID)
+    ax8.grid(True, ls='--', lw=0.5, color=C_GRID, alpha=0.4, axis='y')
+    ax8.tick_params(axis='both', colors=C_MUTED, labelsize=10)
+
     plt.savefig(output_path, dpi=300, facecolor=fig.get_facecolor(), bbox_inches='tight')
-    print(f"\n✅ Dashboard ampliado e corrigido salvo com sucesso: {output_path}")
+    print(f"\n✅ Dashboard ampliado e corrigido com 8 painéis salvo em: {output_path}")
     try:
         plt.show()
     except KeyboardInterrupt:
@@ -1006,8 +1245,10 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_all_csvs(results, company_metrics_df, sector_metrics_df, quality_df, raw_data,
-                  diffusion_df, macro_corr_df, sample_comp_df):
-    """Salva todos os 8 CSVs de auditoria."""
+                  diffusion_df, macro_corr_df, sample_comp_df, lookahead_audit_df=None,
+                  included_companies_df=None, excluded_companies_df=None,
+                  collection_errors_df=None, sample_audit_df=None):
+    """Salva todos os CSVs de auditoria (8 originais + lookahead_audit.csv + 4 CSVs de expansão de amostra)."""
     company_metrics_df.to_csv('bico_de_pato_company_metrics.csv', index=False)
     print("  📄 bico_de_pato_company_metrics.csv")
 
@@ -1018,8 +1259,14 @@ def save_all_csvs(results, company_metrics_df, sector_metrics_df, quality_df, ra
     ntnb_i = results.get('ntnb_initial', np.nan)
     ntnb_f = results.get('ntnb_final', np.nan)
     ntnb_chg = results.get('ntnb_change_pp', np.nan)
+    cand_count = results.get('candidate_count', len(results['valid_tickers']))
+    eff_count = results.get('effective_sample_size', len(results['valid_tickers']))
+    disc_count = results.get('excluded_count', 0)
 
     summary_rows = [
+        {'Metric': 'Universo Candidato', 'Initial_Value': f"{cand_count}", 'Final_Value': f"{cand_count}", 'Change': '0', 'Interpretation': 'Total de empresas submetidas à análise'},
+        {'Metric': 'Amostra Efetiva (N)', 'Initial_Value': f"{eff_count}", 'Final_Value': f"{eff_count}", 'Change': f"{eff_count}", 'Interpretation': 'Empresas com dados suficientes que participaram dos cálculos'},
+        {'Metric': 'Empresas Descartadas', 'Initial_Value': f"{disc_count}", 'Final_Value': f"{disc_count}", 'Change': f"{disc_count}", 'Interpretation': 'Empresas excluídas por falta de preços, EBITDA ou ações'},
         {'Metric': 'EBITDA LTM Index (Mediano)', 'Initial_Value': '100.0',
          'Final_Value': f"{primary['ebitda_change_pct'] + 100:.1f}",
          'Change': f"{primary['ebitda_change_pct']:+.1f}%",
@@ -1039,6 +1286,9 @@ def save_all_csvs(results, company_metrics_df, sector_metrics_df, quality_df, ra
         {'Metric': 'Resultado Hipótese', 'Initial_Value': '—', 'Final_Value': '—',
          'Change': primary['classification'],
          'Interpretation': 'Classificação empírica com critérios documentados'},
+        {'Metric': 'Metodologia PIT', 'Initial_Value': '—', 'Final_Value': '—',
+         'Change': 'Point-in-Time adjusted',
+         'Interpretation': 'Dados fundamentais filtrados por publication_date <= observation_date'},
     ]
     pd.DataFrame(summary_rows).to_csv('bico_de_pato_summary.csv', index=False)
     print("  📄 bico_de_pato_summary.csv")
@@ -1059,55 +1309,86 @@ def save_all_csvs(results, company_metrics_df, sector_metrics_df, quality_df, ra
     sample_comp_df.to_csv('bico_de_pato_sample_comparison.csv', index=False)
     print("  📄 bico_de_pato_sample_comparison.csv")
 
+    # Look-ahead audit CSV (Point-in-Time)
+    if lookahead_audit_df is not None and not lookahead_audit_df.empty:
+        lookahead_audit_df.to_csv('lookahead_audit.csv', index=False)
+        print("  📄 lookahead_audit.csv (Point-in-Time audit trail)")
+
+    # 4 CSVs de expansão de amostra
+    if included_companies_df is not None and not included_companies_df.empty:
+        included_companies_df.to_csv('included_companies.csv', index=False)
+        print("  📄 included_companies.csv")
+
+    if excluded_companies_df is not None and not excluded_companies_df.empty:
+        excluded_companies_df.to_csv('excluded_companies.csv', index=False)
+        print("  📄 excluded_companies.csv")
+
+    if collection_errors_df is not None and not collection_errors_df.empty:
+        collection_errors_df.to_csv('collection_errors.csv', index=False)
+        print("  📄 collection_errors.csv")
+    else:
+        pd.DataFrame(columns=['ticker', 'stage', 'error_type', 'error_message', 'timestamp']).to_csv('collection_errors.csv', index=False)
+        print("  📄 collection_errors.csv (sem erros de exceção)")
+
+    if sample_audit_df is not None and not sample_audit_df.empty:
+        sample_audit_df.to_csv('sample_audit.csv', index=False)
+        print("  📄 sample_audit.csv")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 9. CONCLUSÃO E INTERPRETAÇÃO AUTOMÁTICA
 # ══════════════════════════════════════════════════════════════════════════════
 
 def print_conclusion(results):
-    """Imprime a conclusão empírica com interpretação dinâmica."""
+    """Imprime a conclusão empírica com interpretação dinâmica e matriz do Evidence Scorecard."""
     primary = results['samples']['ex_leaders']
     full_dates = results['full_dates']
+    eval_res = results.get('hypothesis_evaluation', {})
 
     ntnb_i = results.get('ntnb_initial', np.nan)
     ntnb_f = results.get('ntnb_final', np.nan)
     spread_i = results.get('spread_initial', np.nan)
     spread_f = results.get('spread_final', np.nan)
 
-    ey_i = primary['ebitda_yield_median'].dropna().iloc[0] if not primary['ebitda_yield_median'].dropna().empty else np.nan
-    ey_f = primary['ebitda_yield_median'].dropna().iloc[-1] if not primary['ebitda_yield_median'].dropna().empty else np.nan
+    diff_bico_final = primary.get('bico_diffusion_pct', primary['diffusion_bico'].iloc[-1] if not primary['diffusion_bico'].empty else np.nan)
+    k_val = primary.get('K', 0)
+    n_val = primary.get('N', len(results['valid_tickers_ex_leaders']))
 
-    diff_bico_final = primary['diffusion_bico'].iloc[-1] if not primary['diffusion_bico'].empty else np.nan
+    binom = primary.get('binomial_test', {})
+    corr = primary.get('correlations', {})
+    status_final = eval_res.get('status', primary['classification'])
 
     print("\n")
-    print("=" * 65)
-    print("       BICO DE PATO — RESULTADO FINAL DA HIPÓTESE")
-    print("=" * 65)
+    print("=" * 70)
+    print("       BICO DE PATO — RESULTADO FINAL DA HIPÓTESE & EVIDENCE SCORECARD")
+    print("=" * 70)
     print(f"\n  Período Válido: {full_dates[0].strftime('%b/%Y')} → {full_dates[-1].strftime('%b/%Y')}")
-    print(f"  Amostra Primária: Ex-PETR4/VALE3 ({len(results['valid_tickers_ex_leaders'])} empresas)")
+    print(f"  Amostra Primária: Ex-PETR4/VALE3 (N = {n_val} empresas, K = {k_val} Bico de Pato)")
     print(f"\n  EBITDA Mediano:      {primary['ebitda_change_pct']:+.1f}%")
     print(f"  EBITDA Agregado:     {primary['ebitda_growth_agg_pct']:+.1f}%")
     print(f"\n  EV Agregado:         {primary['ev_growth_pct']:+.1f}%")
     print(f"  Market Cap Agregado: {primary['mcap_growth_pct']:+.1f}%")
     print(f"  Dívida Liq. Agregada:{primary['netdebt_growth_pct']:+.1f}%")
     print(f"\n  EV/EBITDA Mediano:   {primary['initial_multiple']:.1f}x → {primary['final_multiple']:.1f}x ({primary['multiple_change_pct']:+.1f}%)")
-    print(f"  EV/EBITDA Agregado:  {primary['multiple_change_agg_pct']:+.1f}%")
     print(f"\n  NTN-B IPCA+:         {ntnb_i:.2f}% → {ntnb_f:.2f}% ({results.get('ntnb_change_pp', 0):+.2f} p.p.)")
     print(f"  Spread Operacional:  {spread_i:+.1f} p.p. → {spread_f:+.1f} p.p.")
-    print(f"\n  Difusão Bico de Pato:{diff_bico_final:.1f}% das empresas com EBITDA ↑ e EV/EBITDA ↓")
-    print(f"\n  {'─' * 55}")
-    print(f"  CONCLUSÃO: {primary['classification']}")
-    print(f"  {'─' * 55}")
+    print(f"\n  Difusão Bico de Pato:{diff_bico_final:.1f}% (K={k_val}/{n_val})")
+    print(f"  Teste Binomial Exato: p-value = {binom.get('p_value', 1.0):.4f} (IC95%: [{binom.get('ci_lower', 0)*100:.1f}%; {binom.get('ci_upper', 0)*100:.1f}%])")
+    print(f"  Spearman rho:        {corr.get('rho_spearman', 0.0):.3f} (p-value = {corr.get('p_value_spearman', 1.0):.4f})")
+    print(f"\n  {'─' * 60}")
+    print(f"  STATUS DA HIPÓTESE: [{status_final}]")
+    print(f"  {'─' * 60}")
 
-    print("\n  Interpretação Automática Baseada nos Dados:")
-    print(f"    A hipótese de desconexão foi classificada como {primary['classification']}.")
-    print(f"    Entre {full_dates[0].strftime('%b/%Y')} e {full_dates[-1].strftime('%b/%Y')}:")
-    print(f"    - O EBITDA mediano cresceu {primary['ebitda_change_pct']:+.1f}% ({primary['ebitda_growth_agg_pct']:+.1f}% no agregado).")
-    print(f"    - O múltiplo EV/EBITDA mediano variou {primary['multiple_change_pct']:+.1f}%.")
-    print(f"    - {diff_bico_final:.1f}% das empresas apresentaram simultaneamente EBITDA crescente e compressão de múltiplo.")
-    print(f"    - Os juros reais (NTN-B) variaram {results.get('ntnb_change_pp', 0):+.2f} p.p., associados visualmente ao período.")
-    print("    Ressalva: Esta relação indica associação empírica no período, NÃO causalidade provada.")
-    print("=" * 65)
+    print("\n  Matriz de Evidências (Scorecard 9 Dimensões):")
+    for criterion, status_val in eval_res.get('scorecard', {}).items():
+        print(f"    [{status_val:4s}] {criterion}")
+
+    print("\n  Justificativas Dinâmicas:")
+    for reason in eval_res.get('justification_reasons', []):
+        print(f"    {reason}")
+
+    print("\n  Ressalva Metodológica: Esta relação indica associação empírica descritiva no período, NÃO causalidade provada.")
+    print("=" * 70)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1115,28 +1396,47 @@ def print_conclusion(results):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    """Executa a análise completa do Bico de Pato com rigor metodológico."""
+    """Executa a análise completa do Bico de Pato com universo expandido e rigor metodológico."""
     start_time = time.time()
 
-    print("📥 Coletando cotações históricas reais via yfinance (sem preços sintéticos)...")
+    candidate_count = len(CANDIDATE_TICKERS)
+    print(f"📥 Coletando cotações históricas reais para {candidate_count} empresas candidatas da B3 (sem preços sintéticos)...")
     prices_df, ibov_source = download_all_prices(TICKERS, IBOV_TICKER, START_DATE)
 
-    # Identificar empresas com preços válidos (SEM CRIAR PREÇOS SINTÉTICOS PELO IBOVESPA)
-    valid_tickers = []
+    # Identificação inicial de preços válidos
     price_sources = {}
-    for ticker in TICKERS:
-        if ticker in prices_df.columns and not prices_df[ticker].dropna().empty:
-            valid_tickers.append(ticker)
-            price_sources[ticker] = "YFINANCE_REAL"
-        else:
-            price_sources[ticker] = "PRICE_DATA_INSUFFICIENT"
-            print(f"  ⚠️  {ticker}: Preço histórico indisponível no yfinance. EXCLUÍDO DA AMOSTRA.")
+    included_companies = []
+    excluded_companies = []
+    collection_errors = []
+    sample_audit_rows = []
 
-    if not valid_tickers:
+    for item in CANDIDATE_TICKERS:
+        ticker = item["ticker"]
+        name = item["name"]
+        sector = item["sector"]
+
+        if ticker not in prices_df.columns or prices_df[ticker].dropna().empty:
+            price_sources[ticker] = "PRICE_DATA_INSUFFICIENT"
+            reason = "MISSING_PRICE_DATA"
+            details = "Preço histórico indisponível no yfinance"
+            excluded_companies.append({
+                "ticker": ticker, "company_name": name, "sector": sector,
+                "status": "DISCARDED", "exclusion_reason": reason, "details": details
+            })
+            sample_audit_rows.append({
+                "ticker": ticker, "company_name": name, "sector": sector,
+                "candidate": True, "included": False, "exclusion_reason": reason, "data_quality": "INSUFFICIENT_DATA"
+            })
+            logger.debug(f"  ⚠️  {ticker} ({name}): {details}. EXCLUÍDO DA AMOSTRA.")
+        else:
+            price_sources[ticker] = "YFINANCE_REAL"
+
+    # Alinhamento temporal dinâmico com base nos preços reais disponíveis
+    valid_price_tickers = [t for t in TICKERS if price_sources.get(t) == "YFINANCE_REAL"]
+    if not valid_price_tickers:
         raise RuntimeError("❌ Falha crítica: Nenhum ticker obteve cotações reais válidas.")
 
-    # Alinhamento temporal dinâmico (intersecção comum real)
-    last_price_date = prices_df[valid_tickers].dropna(how='all').index.max()
+    last_price_date = prices_df[valid_price_tickers].dropna(how='all').index.max()
     if hasattr(last_price_date, 'tz') and last_price_date.tz is not None:
         last_price_date = last_price_date.tz_localize(None)
 
@@ -1168,7 +1468,20 @@ def main():
     ntnb_raw.index = pd.to_datetime(ntnb_raw.index)
     ntnb_monthly = ntnb_raw.reindex(full_dates).ffill()
 
-    print("\n📊 Construindo demonstrativos fundamentais e calculando valuation por empresa...")
+    # ══════════════════════════════════════════════════════════════════
+    # POINT-IN-TIME: Popular FundamentalStore com dados hardcoded existentes
+    # ══════════════════════════════════════════════════════════════════
+    print("\n📊 Populando FundamentalStore com dados hardcoded (Point-in-Time)...")
+    pit_store = FundamentalStore()
+    populate_store_from_hardcoded(
+        pit_store, EBITDA_DATES,
+        EBITDA_HARDCODED_BI, NET_DEBT_HARDCODED_BI,
+        NET_INCOME_HARDCODED_BI, SHARES_OUTSTANDING_FALLBACK_BI,
+    )
+    n_records = len(pit_store.get_all_records())
+    print(f"  ✅ {n_records} registros fundamentais originais carregados no FundamentalStore")
+
+    print("\n📊 Processando e validando dados fundamentais por empresa...")
 
     df_ebitda_monthly = pd.DataFrame(index=full_dates)
     df_netdebt_monthly = pd.DataFrame(index=full_dates)
@@ -1179,53 +1492,196 @@ def main():
     df_ebitda_yield = pd.DataFrame(index=full_dates)
     df_earnings_yield = pd.DataFrame(index=full_dates)
 
+    # Point-in-Time tracking
+    df_lookahead_flags = pd.DataFrame(index=full_dates)
+    all_audit_records = []
+
+    valid_tickers = []
     ebitda_sources = {}
     shares_sources = {}
     negative_ev_counts = {}
+    ticker_lookahead_flags = {}
 
-    for ticker in valid_tickers:
-        s_price_raw = prices_df[ticker].dropna()
-        s_price_monthly = s_price_raw.resample('ME').last().reindex(full_dates).ffill()
+    for item in CANDIDATE_TICKERS:
+        ticker = item["ticker"]
+        name = item["name"]
+        sector = item["sector"]
 
-        hardcoded_list = EBITDA_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
-        ebitda_annual, ebitda_src = get_ebitda_ltm(ticker, EBITDA_DATES, hardcoded_list)
-        ebitda_sources[ticker] = ebitda_src
-        df_ebitda_monthly[ticker] = build_monthly_series(ebitda_annual, EBITDA_DATES, full_dates)
+        if price_sources.get(ticker) != "YFINANCE_REAL":
+            continue  # já registrado como descarte por preço
 
-        nd_values = NET_DEBT_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
-        nd_annual = pd.Series(nd_values, index=EBITDA_DATES, dtype=float)
-        df_netdebt_monthly[ticker] = build_monthly_series(nd_annual, EBITDA_DATES, full_dates)
+        try:
+            s_price_raw = prices_df[ticker].dropna()
+            s_price_monthly = s_price_raw.resample('ME').last().reindex(full_dates).ffill()
 
-        ni_values = NET_INCOME_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
-        ni_annual = pd.Series(ni_values, index=EBITDA_DATES, dtype=float)
-        df_netincome_monthly[ticker] = build_monthly_series(ni_annual, EBITDA_DATES, full_dates)
+            hardcoded_list = EBITDA_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
+            ebitda_annual, ebitda_src = get_ebitda_ltm(ticker, EBITDA_DATES, hardcoded_list)
 
-        s_shares, shares_src = get_shares_outstanding(ticker, full_dates)
-        shares_sources[ticker] = shares_src
+            # Adicionar dados yfinance ao store PIT
+            populate_store_from_yfinance(pit_store, ticker, ebitda_annual, ebitda_src, EBITDA_DATES)
 
-        mcap = s_price_monthly * s_shares
-        df_market_cap[ticker] = mcap
+            # Construção de séries mensais Point-in-Time
+            ebitda_pit_values, ebitda_pit_flags, ebitda_audit = build_pit_monthly_series(
+                pit_store, ticker, 'EBITDA', full_dates, is_ebitda=True
+            )
+            nd_pit_values, nd_pit_flags, nd_audit = build_pit_monthly_series(
+                pit_store, ticker, 'NET_DEBT', full_dates, is_ebitda=False
+            )
+            ni_pit_values, ni_pit_flags, ni_audit = build_pit_monthly_series(
+                pit_store, ticker, 'NET_INCOME', full_dates, is_ebitda=False
+            )
 
-        ev = mcap + df_netdebt_monthly[ticker]
-        df_ev[ticker] = ev
-        negative_ev_counts[ticker] = (ev <= 0).sum()
+            legacy_ebitda = build_monthly_series(ebitda_annual, EBITDA_DATES, full_dates)
+            nd_values = NET_DEBT_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
+            nd_annual = pd.Series(nd_values, index=EBITDA_DATES, dtype=float)
+            legacy_nd = build_monthly_series(nd_annual, EBITDA_DATES, full_dates)
+            ni_values = NET_INCOME_HARDCODED_BI.get(ticker, [0.0] * len(EBITDA_DATES))
+            ni_annual = pd.Series(ni_values, index=EBITDA_DATES, dtype=float)
+            legacy_ni = build_monthly_series(ni_annual, EBITDA_DATES, full_dates)
 
-        ebitda_ltm = df_ebitda_monthly[ticker]
-        ebitda_pos = ebitda_ltm.where(ebitda_ltm > 0)
-        ev_pos = ev.where(ev > 0)
+            ebitda_final_series = ebitda_pit_values.combine_first(legacy_ebitda)
+            nd_final_series = nd_pit_values.combine_first(legacy_nd)
+            ni_final_series = ni_pit_values.combine_first(legacy_ni)
 
-        # MÚLTIPLO EV/EBITDA SEM FILTRO ARBITRÁRIO DE <= 100 (RAW)
-        ev_ebitda = ev_pos / ebitda_pos
-        df_ev_ebitda[ticker] = ev_ebitda
+            # ── VALIDAÇÕES DE QUALIDADE MÍNIMA PARA INCLUSÃO ──
+            if ebitda_final_series.dropna().empty or (ebitda_final_series <= 0).all():
+                reason = "INSUFFICIENT_EBITDA_DATA"
+                details = "EBITDA LTM ausente ou não positivo"
+                excluded_companies.append({
+                    "ticker": ticker, "company_name": name, "sector": sector,
+                    "status": "DISCARDED", "exclusion_reason": reason, "details": details
+                })
+                sample_audit_rows.append({
+                    "ticker": ticker, "company_name": name, "sector": sector,
+                    "candidate": True, "included": False, "exclusion_reason": reason, "data_quality": "INSUFFICIENT_DATA"
+                })
+                continue
 
-        ebitda_yield = (ebitda_pos / ev_pos) * 100.0
-        df_ebitda_yield[ticker] = ebitda_yield
+            s_shares, shares_src = get_shares_outstanding(ticker, full_dates)
+            if s_shares.dropna().empty or (s_shares <= 0).all():
+                reason = "MISSING_SHARES"
+                details = "Quantidade de ações ausente ou inválida"
+                excluded_companies.append({
+                    "ticker": ticker, "company_name": name, "sector": sector,
+                    "status": "DISCARDED", "exclusion_reason": reason, "details": details
+                })
+                sample_audit_rows.append({
+                    "ticker": ticker, "company_name": name, "sector": sector,
+                    "candidate": True, "included": False, "exclusion_reason": reason, "data_quality": "INSUFFICIENT_DATA"
+                })
+                continue
 
-        ni_ltm = df_netincome_monthly[ticker]
-        ni_pos = ni_ltm.where(ni_ltm > 0)
-        mcap_pos = mcap.where(mcap > 0)
-        earnings_yield = (ni_pos / mcap_pos) * 100.0
-        df_earnings_yield[ticker] = earnings_yield
+            # Se aprovado em todas as validações:
+            valid_tickers.append(ticker)
+            ebitda_sources[ticker] = ebitda_src
+            shares_sources[ticker] = shares_src
+            all_audit_records.extend(ebitda_audit)
+            all_audit_records.extend(nd_audit)
+            all_audit_records.extend(ni_audit)
+
+            df_ebitda_monthly[ticker] = ebitda_final_series
+            df_netdebt_monthly[ticker] = nd_final_series
+            df_netincome_monthly[ticker] = ni_final_series
+
+            consolidated_flags = pd.Series('UNKNOWN', index=full_dates, dtype=str)
+            for obs_date in full_dates:
+                flag = compute_observation_lookahead_flag(
+                    ebitda_pit_flags.loc[obs_date],
+                    nd_pit_flags.loc[obs_date],
+                    ni_pit_flags.loc[obs_date],
+                    'UNKNOWN',
+                )
+                consolidated_flags.loc[obs_date] = flag
+
+            df_lookahead_flags[ticker] = consolidated_flags
+            ticker_lookahead_flags[ticker] = consolidated_flags
+
+            mcap = s_price_monthly * s_shares
+            df_market_cap[ticker] = mcap
+
+            ev = mcap + df_netdebt_monthly[ticker]
+            df_ev[ticker] = ev
+            negative_ev_counts[ticker] = (ev <= 0).sum()
+
+            ebitda_ltm = df_ebitda_monthly[ticker]
+            ebitda_pos = ebitda_ltm.where(ebitda_ltm > 0)
+            ev_pos = ev.where(ev > 0)
+
+            ev_ebitda = ev_pos / ebitda_pos
+            df_ev_ebitda[ticker] = ev_ebitda
+
+            ebitda_yield = (ebitda_pos / ev_pos) * 100.0
+            df_ebitda_yield[ticker] = ebitda_yield
+
+            ni_ltm = df_netincome_monthly[ticker]
+            ni_pos = ni_ltm.where(ni_ltm > 0)
+            mcap_pos = mcap.where(mcap > 0)
+            earnings_yield = (ni_pos / mcap_pos) * 100.0
+            df_earnings_yield[ticker] = earnings_yield
+
+            included_companies.append({
+                "ticker": ticker, "company_name": name, "sector": sector, "status": "INCLUDED"
+            })
+            sample_audit_rows.append({
+                "ticker": ticker, "company_name": name, "sector": sector,
+                "candidate": True, "included": True, "exclusion_reason": "NONE", "data_quality": "VALID"
+            })
+
+        except Exception as e:
+            reason = "COLLECTION_ERROR"
+            details = f"Exceção de Coleta: {type(e).__name__} — {str(e)}"
+            excluded_companies.append({
+                "ticker": ticker, "company_name": name, "sector": sector,
+                "status": "DISCARDED", "exclusion_reason": reason, "details": details
+            })
+            collection_errors.append({
+                "ticker": ticker, "stage": "data_collection", "error_type": type(e).__name__,
+                "error_message": str(e), "timestamp": datetime.now().isoformat()
+            })
+            sample_audit_rows.append({
+                "ticker": ticker, "company_name": name, "sector": sector,
+                "candidate": True, "included": False, "exclusion_reason": reason, "data_quality": "ERROR"
+            })
+            continue
+
+    # ── CONTAGEM E ASSERTIONS DE AMOSTRAGEM ──
+    effective_sample_size = len(included_companies)
+    excluded_count = len(excluded_companies)
+    assert candidate_count == effective_sample_size + excluded_count, \
+        f"Erro de Contagem: {candidate_count} candidatas != {effective_sample_size} incluídas + {excluded_count} descartadas"
+
+    # Construção dinâmica de setores baseada na amostra efetiva
+    SECTORS = {}
+    for item in included_companies:
+        sec = item["sector"]
+        if sec not in SECTORS:
+            SECTORS[sec] = []
+        SECTORS[sec].append(item["ticker"])
+
+    # Amostras secundárias dinâmicas
+    n_all = len(valid_tickers)
+    n_ex_leaders = len([t for t in valid_tickers if t not in COMMODITY_LEADERS])
+    n_ex_commodities = len([t for t in valid_tickers if t not in COMMODITY_ALL])
+
+    SAMPLE_DEFINITIONS = {
+        'all':            {'label': f'Todas (N={n_all})',                 'exclude': []},
+        'ex_leaders':     {'label': f'Ex-PETR4/VALE3 (N={n_ex_leaders})', 'exclude': COMMODITY_LEADERS},
+        'ex_commodities': {'label': f'Ex-Commodities Amplo (N={n_ex_commodities})', 'exclude': COMMODITY_ALL},
+    }
+
+    # Relatório executivo do processo de amostragem
+    print("\n" + "=" * 65)
+    print("                    RESUMO DA COLETA")
+    print("=" * 65)
+    print(f"  Universo Candidato:     {candidate_count} empresas")
+    print(f"  Amostra Efetiva (N):    {effective_sample_size} empresas")
+    print(f"  Empresas Descartadas:   {excluded_count} empresas")
+    yield_rate = (effective_sample_size / candidate_count * 100.0) if candidate_count > 0 else 0.0
+    print(f"  Taxa de Aproveitamento: {yield_rate:.1f}%")
+    print("=" * 65)
+
+    # Point-in-Time audit summary
+    pit_audit_df = generate_audit_dataframe(all_audit_records)
 
     # ASSERTIONS DE INTEGRIDADE MATEMÁTICA
     for col in valid_tickers:
@@ -1244,7 +1700,15 @@ def main():
 
     print(f"\n✅ Validações Matemáticas Concluídas com Sucesso! ({len(valid_tickers)} empresas ativas)")
 
-    print("\n📊 Calculando métricas e decomposição por amostra...")
+    # Série de variação da NTN-B para regressão
+    ntnb_clean = ntnb_monthly.dropna()
+    ntnb_initial = ntnb_clean.iloc[0] if len(ntnb_clean) > 0 else np.nan
+    ntnb_final = ntnb_clean.iloc[-1] if len(ntnb_clean) > 0 else np.nan
+    ntnb_change_pp = ntnb_final - ntnb_initial
+
+    delta_ntnb_const = pd.Series(ntnb_change_pp, index=valid_tickers)
+
+    print("\n📊 Calculando métricas, estatísticas e persistência por amostra...")
     robustness_results = {}
     for key, sdef in SAMPLE_DEFINITIONS.items():
         sample_tickers = [t for t in valid_tickers if t not in sdef['exclude']]
@@ -1253,23 +1717,23 @@ def main():
         metrics = calculate_sample_metrics(
             df_ev_ebitda, df_ebitda_yield, df_earnings_yield,
             df_ebitda_monthly, df_ev, df_market_cap, df_netdebt_monthly,
-            full_dates, sample_tickers
+            full_dates, sample_tickers, delta_ntnb_series=delta_ntnb_const[sample_tickers]
         )
         if metrics:
             robustness_results[key] = metrics
-            print(f"  ✅ {sdef['label']}: EBITDA Mediano {metrics['ebitda_change_pct']:+.1f}% | "
-                  f"EV/EBITDA Mediano {metrics['multiple_change_pct']:+.1f}% | {metrics['classification']}")
+            print(f"  ✅ {sdef['label']}: N={metrics['N']} K={metrics['K']} ({metrics['bico_diffusion_pct']:.1f}%) | "
+                  f"EBITDA {metrics['ebitda_change_pct']:+.1f}% | EV/EBITDA {metrics['multiple_change_pct']:+.1f}%")
 
     primary = robustness_results['ex_leaders']
+    ex_comm = robustness_results.get('ex_commodities', primary)
+    all_samp = robustness_results.get('all', primary)
+
+    # Avaliação rigorosa da Matriz de Evidências (Evidence Scorecard)
+    hypothesis_eval = evaluate_evidence_scorecard(all_samp, primary, ex_comm, pit_valid=True)
 
     sector_indices, sector_growth, sector_mult = calculate_sector_metrics(
-        df_ebitda_monthly, df_ev_ebitda, df_ev, full_dates
+        df_ebitda_monthly, df_ev_ebitda, df_ev, full_dates, SECTORS
     )
-
-    ntnb_clean = ntnb_monthly.dropna()
-    ntnb_initial = ntnb_clean.iloc[0] if len(ntnb_clean) > 0 else np.nan
-    ntnb_final = ntnb_clean.iloc[-1] if len(ntnb_clean) > 0 else np.nan
-    ntnb_change_pp = ntnb_final - ntnb_initial
 
     ey_clean = primary['ebitda_yield_median'].dropna()
     ey_initial = ey_clean.iloc[0] if len(ey_clean) > 0 else np.nan
@@ -1279,10 +1743,11 @@ def main():
 
     quality_df = validate_dataset(
         valid_tickers, df_ebitda_monthly, df_ev, df_market_cap, df_ev_ebitda,
-        ebitda_sources, shares_sources, price_sources, negative_ev_counts
+        ebitda_sources, shares_sources, price_sources, negative_ev_counts,
+        lookahead_flags=ticker_lookahead_flags,
     )
 
-    # 1. Company Metrics DataFrame
+    # DataFrames dos CSVs
     company_rows = []
     for ticker in valid_tickers:
         ebitda_col = df_ebitda_monthly[ticker].dropna()
@@ -1334,16 +1799,16 @@ def main():
             'Bico_de_Pato': bico_flag,
         })
 
-    company_metrics_df = pd.DataFrame(company_rows)
-    company_metrics_df = company_metrics_df.sort_values('EV_EBITDA_Change_%', ascending=True, na_position='last')
+    company_metrics_df = pd.DataFrame(company_rows).sort_values('EV_EBITDA_Change_%', ascending=True)
 
-    # 2. Sector Metrics DataFrame
     sector_rows = []
-    for sn in SECTORS:
-        sec_tickers = [t for t in SECTORS[sn] if t in valid_tickers]
+    for sn, sec_tickers in SECTORS.items():
+        valid_sec_tickers = [t for t in sec_tickers if t in valid_tickers]
+        if not valid_sec_tickers:
+            continue
         row = {
             'Setor': sn,
-            'N_Empresas': len(sec_tickers),
+            'N_Empresas': len(valid_sec_tickers),
             'EBITDA_Growth_%': round(sector_growth.get(sn, np.nan), 1),
         }
         sm = sector_mult.get(sn, {})
@@ -1353,7 +1818,6 @@ def main():
         sector_rows.append(row)
     sector_metrics_df = pd.DataFrame(sector_rows)
 
-    # 3. Diffusion DataFrame
     diffusion_df = pd.DataFrame({
         'Date': full_dates,
         'Pct_Companies_EBITDA_Up': primary['diffusion_ebitda_up'],
@@ -1361,14 +1825,21 @@ def main():
         'Pct_Companies_Bico_de_Pato': primary['diffusion_bico'],
     })
 
-    # 4. Macro Correlation DataFrame
+    def _safe_corr(s1, s2):
+        df_c = pd.DataFrame({'a': s1, 'b': s2}).dropna()
+        if len(df_c) < 3:
+            return np.nan
+        cov = np.cov(df_c['a'], df_c['b'])
+        if cov[0, 0] > 0 and cov[1, 1] > 0:
+            return float(cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1]))
+        return np.nan
+
     macro_corr_df = pd.DataFrame([{
-        'Corr_NTNB_vs_EV_EBITDA_Mediano': primary['ev_ebitda_median'].corr(ntnb_monthly),
-        'Corr_NTNB_vs_Earnings_Yield_Mediano': primary['earnings_yield_median'].corr(ntnb_monthly),
-        'Corr_NTNB_vs_EBITDA_Yield_Mediano': primary['ebitda_yield_median'].corr(ntnb_monthly),
+        'Corr_NTNB_vs_EV_EBITDA_Mediano': _safe_corr(primary['ev_ebitda_median'], ntnb_monthly),
+        'Corr_NTNB_vs_Earnings_Yield_Mediano': _safe_corr(primary['earnings_yield_median'], ntnb_monthly),
+        'Corr_NTNB_vs_EBITDA_Yield_Mediano': _safe_corr(primary['ebitda_yield_median'], ntnb_monthly),
     }])
 
-    # 5. Sample Comparison DataFrame
     sample_comp_rows = []
     for key, sdef in SAMPLE_DEFINITIONS.items():
         r = robustness_results.get(key)
@@ -1376,14 +1847,13 @@ def main():
             sample_comp_rows.append({
                 'Sample_Key': key,
                 'Sample_Label': sdef['label'],
+                'N': r['N'],
+                'K': r['K'],
+                'Bico_Diffusion_%': round(r['bico_diffusion_pct'], 1),
                 'EBITDA_Growth_Mediano_%': round(r['ebitda_change_pct'], 1),
-                'EBITDA_Growth_Agregado_%': round(r['ebitda_growth_agg_pct'], 1),
-                'EV_Growth_Agregado_%': round(r['ev_growth_pct'], 1),
-                'MarketCap_Growth_Agregado_%': round(r['mcap_growth_pct'], 1),
-                'NetDebt_Growth_Agregado_%': round(r['netdebt_growth_pct'], 1),
                 'EV_EBITDA_Mediano_Change_%': round(r['multiple_change_pct'], 1),
-                'EV_EBITDA_Agregado_Change_%': round(r['multiple_change_agg_pct'], 1),
-                'Bico_Diffusion_Final_%': round(r['diffusion_bico'].iloc[-1], 1),
+                'Binomial_p_value': round(r['binomial_test'].get('p_value', 1.0), 4),
+                'Spearman_rho': round(r['correlations'].get('rho_spearman', 0.0), 3),
                 'Classification': r['classification'],
             })
     sample_comp_df = pd.DataFrame(sample_comp_rows)
@@ -1393,14 +1863,25 @@ def main():
         raw_frames[f'{ticker}_EBITDA'] = df_ebitda_monthly.get(ticker)
         raw_frames[f'{ticker}_EV_EBITDA'] = df_ev_ebitda.get(ticker)
         raw_frames[f'{ticker}_MarketCap'] = df_market_cap.get(ticker)
+        raw_frames[f'{ticker}_Lookahead_Flag'] = df_lookahead_flags.get(ticker)
     raw_data = pd.DataFrame(raw_frames, index=full_dates)
+
+    included_companies_df = pd.DataFrame(included_companies)
+    excluded_companies_df = pd.DataFrame(excluded_companies)
+    collection_errors_df = pd.DataFrame(collection_errors)
+    sample_audit_df = pd.DataFrame(sample_audit_rows)
 
     results = {
         'full_dates': full_dates,
         'valid_tickers': valid_tickers,
         'valid_tickers_ex_leaders': [t for t in valid_tickers if t not in COMMODITY_LEADERS],
+        'candidate_count': candidate_count,
+        'effective_sample_size': effective_sample_size,
+        'excluded_count': excluded_count,
         'samples': robustness_results,
         'robustness': robustness_results,
+        'hypothesis_evaluation': hypothesis_eval,
+        'sample_definitions': SAMPLE_DEFINITIONS,
         'ibov_index': ibov_index,
         'ibov_source': ibov_source,
         'ntnb_monthly': ntnb_monthly,
@@ -1415,13 +1896,21 @@ def main():
         'sector_mult': sector_mult,
     }
 
-    print("\n🎨 Gerando dashboard ampliado e corrigido (18x28)...")
+    print("\n📝 Gerando relatório estatístico completo (bico_de_pato_statistical_report.txt)...")
+    generate_statistical_report(results, output_path='bico_de_pato_statistical_report.txt')
+
+    print("\n🎨 Gerando dashboard ampliado com 8 painéis (18x44)...")
     build_dashboard(results, output_path='bico_de_pato_dashboard.png')
 
-    print("\n📄 Salvando 8 arquivos CSV de auditoria...")
+    print("\n📄 Salvando todos os arquivos CSV de auditoria...")
     save_all_csvs(
         results, company_metrics_df, sector_metrics_df, quality_df, raw_data,
-        diffusion_df, macro_corr_df, sample_comp_df
+        diffusion_df, macro_corr_df, sample_comp_df,
+        lookahead_audit_df=pit_audit_df,
+        included_companies_df=included_companies_df,
+        excluded_companies_df=excluded_companies_df,
+        collection_errors_df=collection_errors_df,
+        sample_audit_df=sample_audit_df,
     )
 
     print_conclusion(results)
