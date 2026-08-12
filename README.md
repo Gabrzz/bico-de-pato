@@ -1,136 +1,149 @@
-# 📈 Bico de Pato — Dashboard de Valuation e Desconexão Operacional B3
+# 📈 Bico de Pato — Teste Empírico de Desconexão Operacional na B3
 
-Script em Python que analisa a tese de **Compressão de Múltiplos e Desconexão Operacional** (o famoso “Efeito Bico de Pato”) nas empresas listadas na B3.
+Script em Python que testa, sem forçar resultado, a tese do **"Bico de Pato"**: empresas não-financeiras da B3 cresceram operacionalmente (EBITDA LTM) enquanto o mercado comprimiu o múltiplo (EV/EBITDA), num cenário de juros reais mais altos (NTN-B IPCA+).
 
-![Dashboard Bico de Pato - B3 Top 20](bico_de_pato_top20_b3.png)
+A hipótese **não é assumida como verdadeira**. O código classifica de forma objetiva e auditável:
 
----
-
-## O que o dashboard mostra
-
-O gráfico tem três painéis empilhados, todos no mesmo eixo de tempo (de janeiro/2021 até a data mais recente).
-
-### Painel A — Desconexão Operacional vs. Ibovespa
-
-- **Verde**: EBITDA LTM consolidado das 20 empresas (incluindo Petrobras e Vale).
-- **Ciano**: mesma coisa, mas sem Petrobras e Vale. Essa é a curva principal da tese.
-- **Vermelho tracejado**: Ibovespa (preço).
-- A área sombreada entre a curva ciano e o Ibovespa é o “bico do pato” — quando o operacional sobe e o preço não acompanha.
-- Linhas pontilhadas mais finas mostram a decomposição setorial do EBITDA Ex-Commodities (Utilidades, Bens de Capital/Transporte, Consumo/Varejo/Saúde e Materiais/Alimentos).
-- No canto tem um card com a variação percentual de cada setor e a métrica de difusão.
-
-### Painel B — EV/EBITDA Real (Mediano, Ex-Commodities)
-
-- Linha âmbar: EV/EBITDA mediano real (Market Cap + Dívida Líquida / EBITDA LTM), só das empresas sem Petrobras e Vale.
-- Faixa sombreada: intervalo interquartil (P25–P75).
-- Linha cinza pontilhada: média do período.
-- A anotação no final mostra a compressão do múltiplo do início ao fim da série.
-
-### Painel C — Custo de Capital
-
-- Linha roxa: taxa real da NTN-B 10 anos (IPCA+).
-- Linha ciano: EBITDA Yield implícito (EBITDA / EV).
-- Linha verde pontilhada: Earnings Yield implícito (1 / P/L).
-
-Esse painel coloca lado a lado o custo de oportunidade da renda fixa real e o yield que a bolsa está oferecendo.
+- `CONFIRMADA`
+- `PARCIALMENTE CONFIRMADA`
+- `NÃO CONFIRMADA`
+- `DADOS INSUFFICIENTES`
 
 ---
 
-## A tese em poucas palavras
+## O que o dashboard mostra (18×28, dark)
 
-O “Bico de Pato” acontece quando:
+Ao rodar o script ele gera `bico_de_pato_dashboard.png` (o arquivo que realmente importa) e tenta abrir uma janela interativa com `plt.show()`.
 
-1. O EBITDA das empresas (especialmente as não ligadas a commodities) continua subindo ou se mantém resiliente.
-2. O preço das ações (Ibovespa) não acompanha — geralmente por causa de juros reais altos e risco fiscal.
+**Aviso importante:** a janela interativa costuma espremer os gráficos e fazer legendas/anotações se sobreporem. Ignore a visualização aberta. Olhe só a imagem PNG gerada — ela é o dashboard oficial, com layout controlado.
 
-Essa divergência abre espaço para múltiplos comprimidos e yields mais atrativos em relação à taxa real livre de risco.
+### Header (KPIs no topo)
+Números da amostra primária (Ex-PETR4/VALE3): variação do EBITDA LTM Index, EV/EBITDA mediano, NTN-B 10Y, spread EBITDA Yield vs NTN-B e a classificação final da hipótese.
 
-**Importante:** os múltiplos, yields e a difusão são calculados **somente com as 18 empresas ex-commodities**. Petrobras e Vale entram só na curva verde do Painel A, porque o EBITDA delas depende muito mais do preço internacional das commodities do que do ciclo doméstico.
+### Painel A — Fundamentos operacionais
+EBITDA LTM Index (base 100 = jan/2021):
+- Ciano grosso → mediana das 18 empresas ex-PETR4/VALE3
+- Verde → mediana das 20 empresas
+- Vermelho tracejado → Ibovespa
+- Pontilhados por setor → Utilidades, Bens de Capital/Transporte, Consumo/Varejo/Saúde, Materiais/Alimentos
 
-### Difusão da Tese
+Card com crescimento setorial e % de empresas que subiram EBITDA desde jan/2021.
 
-É o percentual das 18 empresas ex-commodities cujo EBITDA atual está acima do valor de janeiro/2021. Serve para mostrar se o crescimento operacional é amplo ou se está concentrado em poucas empresas.
+### Painel B — O “Bico de Pato”
+Eixo esquerdo (verde): EBITDA LTM Index  
+Eixo direito (âmbar): EV/EBITDA mediano + faixa interquartil (P25–P75)  
+
+Box de decomposição: crescimento de EBITDA, EV, Market Cap, Dívida Líquida e a **difusão do Bico** (% de empresas que simultaneamente tiveram EBITDA ↑ e múltiplo ↓).
+
+### Painel C — Taxa real vs yields
+- Roxo → NTN-B IPCA+ 10 anos
+- Ciano → EBITDA Yield (EBITDA/EV)
+- Verde pontilhado → Earnings Yield (Lucro/MCap)
+
+Sem chamar de WACC ou custo de capital. Só comparação visual de yields.
+
+### Painel D — Robustez por amostra
+Três barras lado a lado:
+1. Todas (20)
+2. Ex-PETR4/VALE3 (18) ← amostra principal
+3. Ex-commodities amplo (14)
 
 ---
 
-## Universo da amostra (20 empresas)
+## Por que o código é assim (regras de integridade)
 
-- **Commodities (excluídas dos múltiplos):** PETR4, VALE3  
-- **Utilidades Públicas:** ELET3, EQTL3, CPLE6, SBSP3, EGIE3  
-- **Consumo, Varejo & Saúde:** ABEV3, MGLU3, LREN3, RADL3, HAPV3  
-- **Bens de Capital & Transporte:** WEGE3, RENT3, RAIL3, EMBR3  
-- **Materiais/Alimentos Ex-Líderes:** GGBR4, CSNA3, SUZB3, JBSS3  
+Nada de “ajustar premissa pra ficar bonito”.
+
+1. **Zero preços sintéticos**  
+   Se o yfinance não entregar cotação real, a empresa vira `PRICE_DATA_INSUFFICIENT` e sai da amostra. Sem inventar preço a partir do Ibovespa.
+
+2. **Limitações honestas do yfinance gratuito**  
+   - EBITDA LTM trimestral só funciona bem nos últimos 4–5 trimestres. Antes disso usa anual ou fallback hardcoded auditado.  
+   - Não tem `announcement_date` da CVM → períodos anuais ficam marcados com `LOOK_AHEAD_RISK = TRUE` no CSV de qualidade.
+
+3. **Sem extrapolação cega**  
+   NTN-B, Ibovespa e preços só usam datas em que realmente existem dados. O período da análise é a interseção comum.
+
+4. **Sem filtro arbitrário de múltiplo**  
+   EV/EBITDA > 100x não é jogado fora. Os dados ficam raw; a robustez vem da mediana + P25/P75.
+
+5. **Mediana + Agregado econômico**  
+   Mediana evita distorção de outliers. Agregado (`ΣEV / ΣEBITDA`) respeita o peso econômico real.
+
+6. **Assertions matemáticas**  
+   Antes de plotar, o script confere:
+   - `EV ≈ Market Cap + Net Debt`
+   - `EV/EBITDA ≈ EV / EBITDA`  
+   Se falhar, aborta.
 
 ---
 
-## Sobre os dados fundamentalistas
+## Os 8 CSVs de auditoria
 
-EBITDA, Dívida Líquida, Lucro Líquido e a série da NTN-B estão **hardcoded** no código.  
+O script sempre gera:
 
-Não é preguiça. Os endpoints completos de fundamentos históricos na BRAPI e no yfinance exigem plano pago, e eu não tenho acesso a eles no momento. Os valores foram coletados manualmente (principalmente de AUVP Analítica e ZoneBourse) e checados com os demonstrativos das próprias empresas.
-
-Consequências práticas:
-
-- Para atualizar o dashboard depois de novos balanços, é preciso adicionar os novos pontos na mão.
-- Os preços e o número de ações são buscados dinamicamente via yfinance a cada execução. Depois do último ponto hardcoded, o script propaga o último valor conhecido de EBITDA/Dívida enquanto o preço continua se movendo.
-- Existe um fallback interno para o número de ações caso a busca dinâmica falhe.
-
-Se você tiver acesso a planos pagos dessas APIs, a recomendação é trocar os dicionários hardcoded por chamadas dinâmicas e deixar o hardcoded só como contingência.
+1. `bico_de_pato_company_metrics.csv` — crescimento e flag `Bico_de_Pato` por empresa  
+2. `bico_de_pato_sector_metrics.csv` — por setor  
+3. `bico_de_pato_summary.csv` — resumo executivo + classificação final  
+4. `bico_de_pato_data_quality.csv` — fontes, Look-Ahead Risk, EV negativo  
+5. `bico_de_pato_raw_data.csv` — séries mensais completas  
+6. `bico_de_pato_bico_diffusion.csv` — % de empresas com EBITDA↑, múltiplo↓ e Bico ao longo do tempo  
+7. `bico_de_pato_macro_correlation.csv` — correlação NTN-B vs yields/múltiplos  
+8. `bico_de_pato_sample_comparison.csv` — comparativo das 3 amostras
 
 ---
 
 ## Como rodar
 
 ```bash
-pip install pandas yfinance matplotlib
+pip install pandas numpy yfinance matplotlib
 python script.py
 ```
 
-O script baixa as cotações, combina com os dados fundamentalistas, calcula tudo e salva a imagem bico_de_pato_top20_b3.png na raiz do projeto.
+Ele baixa preços reais, alinha fundamentos, valida, imprime o relatório no terminal, salva o PNG e os 8 CSVs.
+Lembrete de novo: a janela que abre com plt.show() pode ficar espremida e com legenda por cima do gráfico. Use só a imagem bico_de_pato_dashboard.png.
 
 ---
 
-## Estrutura do repositório
+## Universo (20 empresas não-financeiras)
 
-```text
-.
-├── script.py
-├── bico_de_pato_top20_b3.png
-└── README.md
-```
+Commodities (fora da amostra primária): PETR4, VALE3
+Utilidades: ELET3, EQTL3, CPLE6, SBSP3, EGIE3
+Consumo / Varejo / Saúde: ABEV3, MGLU3, LREN3, RADL3, HAPV3
+Bens de Capital & Transporte: WEGE3, RENT3, RAIL3, EMBR3
+Materiais & Alimentos (ex-líderes): GGBR4, CSNA3, SUZB3, JBSS3
 
 ---
 
 ## Licença
 
-Projeto aberto para fins educacionais e de estudo sobre análise quantitativa e fundamentalista da B3.
+Aberto para estudo de valuation, séries temporais e quant da B3. Use, critique, fork.
 
 ---
 
-## 🤖 Quer entender melhor este repositório?
+## Quer que uma IA explique o repo?
 
-Clique em uma das IAs abaixo. Ela já abre com um prompt pronto pedindo para ler o README e o código. Depois é só perguntar o que quiser.
+Clique em qualquer uma. O prompt já vem pronto pedindo pra ler o README e o código. Depois é só perguntar o que quiser.
 
-<p align="center">
-  <a href="https://claude.ai/new?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas." target="_blank">
-    <img src="https://img.shields.io/badge/Claude-Perguntar%20sobre%20o%20repo-FF6B35?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
-  </a>
-  &nbsp;
-  <a href="https://chatgpt.com/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas." target="_blank">
-    <img src="https://img.shields.io/badge/ChatGPT-Perguntar%20sobre%20o%20repo-10A37F?style=for-the-badge&logo=openai&logoColor=white" alt="ChatGPT">
-  </a>
-  &nbsp;
-  <a href="https://gemini.google.com/app?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas." target="_blank">
-    <img src="https://img.shields.io/badge/Gemini-Perguntar%20sobre%20o%20repo-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini">
-  </a>
-</p>
+```
+    <img src="https://img.shields.io/badge/Claude-Explicar%20o%20repo-FF6B35?style=for-the-badge&#x26;logo=anthropic&#x26;logoColor=white" alt="Claude">
+  
+   
+  
+    <img src="https://img.shields.io/badge/ChatGPT-Explicar%20o%20repo-10A37F?style=for-the-badge&#x26;logo=openai&#x26;logoColor=white" alt="ChatGPT">
+  
+   
+  
+    <img src="https://img.shields.io/badge/Gemini-Explicar%20o%20repo-4285F4?style=for-the-badge&#x26;logo=google&#x26;logoColor=white" alt="Gemini">
+  
 
-<p align="center">
-  <a href="https://chat.deepseek.com/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas." target="_blank">
-    <img src="https://img.shields.io/badge/DeepSeek-Perguntar%20sobre%20o%20repo-4D6BFE?style=for-the-badge&logoColor=white" alt="DeepSeek">
-  </a>
-  &nbsp;
-  <a href="https://kimi.moonshot.cn/?q=Quero%20entender%20este%20reposit%C3%B3rio%20sobre%20a%20tese%20Bico%20de%20Pato%20na%20B3.%20Por%20favor%2C%20leia%20primeiro%20o%20README%20e%20o%20script%20principal%20nestes%20links%3A%0A%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2FREADME.md%0Ahttps%3A%2F%2Fraw.githubusercontent.com%2FGabrzz%2Fbico-de-pato%2Fmain%2Fscript.py%0A%0ADepois%20de%20ler%2C%20fique%20pronto%20para%20responder%20minhas%20perguntas." target="_blank">
-    <img src="https://img.shields.io/badge/Kimi-Perguntar%20sobre%20o%20repo-000000?style=for-the-badge&logoColor=white" alt="Kimi">
-  </a>
-</p>
+
+  
+    <img src="https://img.shields.io/badge/DeepSeek-Explicar%20o%20repo-4D6BFE?style=for-the-badge&#x26;logoColor=white" alt="DeepSeek">
+  
+   
+  
+    <img src="https://img.shields.io/badge/Kimi-Explicar%20o%20repo-000000?style=for-the-badge&#x26;logoColor=white" alt="Kimi">
+  
+
+```
