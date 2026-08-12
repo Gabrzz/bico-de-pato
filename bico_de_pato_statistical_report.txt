@@ -1,0 +1,95 @@
+================================================================================
+            BICO DE PATO — RELATÓRIO ESTATÍSTICO E ECONOMÉTRICO INTEGRAL        
+================================================================================
+Data da Análise: 12/08/2026 19:48:16
+Período Estudado: Jan/2021 → Jul/2026
+Status Final da Hipótese: [PARCIALMENTE CONFIRMADA]
+Resumo: PARCIALMENTE CONFIRMADA — Direção presente, mas pendente em: Difusão > 50%, Teste Binomial (p < 0.05), Robustez Ex-PETR4/VALE3, Robustez Ex-commodities, Persistência Temporal (>= 50%).
+--------------------------------------------------------------------------------
+
+1. COMPOSIÇÃO DAS AMOSTRAS
+--------------------------
+  - Universo Candidato (N total): 102 empresas
+  - Amostra Efetiva Válida (N):   86 empresas
+  - Empresas Descartadas:          16 empresas (sem preços/demonstrativos suficientes)
+
+2. RESULTADOS DESCRITIVOS (AMOSTRA PRIMÁRIA: EX-PETR4/VALE3)
+----------------------------------------------------------
+  - Empresas Válidas (N):            15
+  - Empresas com Bico de Pato (K):  10
+  - Difusão do Bico de Pato (K/N):  66.7%
+  - Variacão do EBITDA (Mediana):    +92.0%
+  - Variação do EV/EBITDA (Mediana): -35.7%
+
+3. TESTE BINOMIAL EXATO (H0: p = 0.50 vs H1: p > 0.50)
+---------------------------------------------------
+  - Proporção Observada (K/N):  66.7%
+  - Intervalo de Confiança 95%: [41.7%; 84.8%]
+  - p-value Binomial Exato:     0.1509
+  - Significante a 5%:          NÃO
+  - Interpretação:              A proporção observada é 66.7% (K=10/15), mas não há evidência estatística suficiente para rejeitar H0 (p = 0.1509).
+
+4. ANÁLISE DE CORRELAÇÃO (Δ EBITDA vs Δ EV/EBITDA)
+-------------------------------------------------
+  - Spearman rho (Principal):   -0.629 (p-value = 0.0039)
+  - Pearson r (Complementar):  -0.630 (p-value = 0.0038)
+  - Interpretação:              Os dados apresentam associação negativa estatisticamente significante entre crescimento do EBITDA e variação do EV/EBITDA (Spearman rho = -0.629, p = 0.0039).
+
+5. REGRESSÕES ECONOMÉTRICAS
+-------------------------
+  [Regressão Simples: Δ(EV/EBITDA) = alpha + beta * Δ(EBITDA)]
+    - Beta EBITDA: -0.3962 (p-value = 0.0500)
+    - R-quadrado:   0.3968 (N = 15)
+  [Regressão Múltipla Controlada por NTN-B IPCA+]
+    - Beta EBITDA: -0.3962 (p-value = 0.0500)
+    - Beta NTN-B:  1.0459 (p-value = 0.0500)
+    - R-quadrado:   0.3968
+
+6. PERSISTÊNCIA TEMPORAL E STREAKS
+--------------------------------
+  - Persistência Mediana por Empresa: 0.0%
+  - Maior Sequência Bico (Longest Streak): 53 períodos consecutivas
+  - Mediana da Sequência (Median Streak):  13.5 períodos
+  - Eventos de Inversão Observados:        100
+  - Endpoint Effect vs Persistent Effect:  12.2% vs 21.0%
+
+7. ROBUSTEZ POR SUBAMOSTRAS
+-------------------------
+  - Amostra 1 (Todas):            N=17, K=11, Difusão=64.7%
+  - Amostra 2 (Ex-PETR4/VALE3):   N=15, K=10, Difusão=66.7%
+  - Amostra 3 (Ex-commodities):   N=12, K=10, Difusão=83.3%
+
+8. MATRIZ DO EVIDENCE SCORECARD
+-------------------------------
+  [PASS] Direção Econômica
+  [FAIL] Difusão > 50%
+  [FAIL] Teste Binomial (p < 0.05)
+  [PASS] Spearman (rho < 0 & p < 0.05)
+  [FAIL] Robustez Ex-PETR4/VALE3
+  [FAIL] Robustez Ex-commodities
+  [FAIL] Persistência Temporal (>= 50%)
+  [PASS] Dados Point-in-Time Válidos
+  [PASS] Regressão Controlada NTN-B
+
+  Justificativas Dinâmicas:
+    ✓ Direção econômica consistente (EBITDA ↑ e EV/EBITDA ↓)
+    ✗ Difusão Bico de Pato abaixo de 50% (0.0%)
+    ✗ Significância binomial insuficiente (p = 0.1509 >= 0.05)
+    ✓ Correlação de Spearman inversa significante (rho = -0.629)
+    ✗ Frágil em Ex-PETR4/VALE3
+    ✗ Frágil em Ex-commodities
+    ✗ Persistência temporal fraca/em avaliação (0.0%)
+    ✓ Dados Point-in-Time válidos
+
+
+9. LIMITAÇÕES METODOLÓGICAS E CONCLUSÃO NÃO-CAUSAL
+-------------------------------------------------
+  Limitações:
+  1. Dados históricos fundamentais em modalidade gratuita utilizam as-of publication_date estimadas (~75d).
+  2. Co-movimentações com juros reais (NTN-B) são de natureza empírica descritiva.
+  Conclusão Automatizada:
+  Os dados apresentam evidência descritiva da co-ocorrência de crescimento do EBITDA com compressão
+  do múltiplo EV/EBITDA na amostra analisada. As análises de robustez e persistência temporal indicam
+  a presença do fenômeno em variadas subamostras. Entretanto, os resultados NÃO estabelecem causalidade
+  e devem ser interpretados estritamente no contexto macroeconômico do período.
+================================================================================

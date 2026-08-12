@@ -878,15 +878,42 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     ax1.plot(full_dates, ibov_index,
              label='Ibovespa (Benchmark de Mercado)', color=C_IBOV, lw=2.2, ls='--', alpha=0.9, zorder=3)
 
-    SEC_COLORS = {'Utilidades Públicas': '#38BDF8', 'Bens de Capital & Transp.': '#F59E0B',
-                  'Consumo, Varejo & Saúde': '#EC4899', 'Materiais & Alimentos': '#A855F7'}
-    for sec_name in sector_indices.columns:
-        c = SEC_COLORS.get(sec_name, '#64748B')
-        ax1.plot(full_dates, sector_indices[sec_name],
-                 label=f'Setor: {sec_name}', color=c, lw=1.2, ls=':', alpha=0.55, zorder=2)
+    SEC_PALETTE = [
+        '#38BDF8', '#F59E0B', '#EC4899', '#A855F7', '#10B981',
+        '#F43F5E', '#8B5CF6', '#06B6D4', '#EAB308', '#F97316',
+        '#14B8A6', '#6366F1', '#3B82F6', '#EF4444', '#84CC16'
+    ]
+
+    end_positions = []
+    for idx, sec_name in enumerate(sector_indices.columns, start=1):
+        c = SEC_PALETTE[(idx - 1) % len(SEC_PALETTE)]
+        series = sector_indices[sec_name]
+        ax1.plot(full_dates, series,
+                 label=f'[{idx}] {sec_name}', color=c, lw=1.6, ls=':', alpha=0.85, zorder=2)
+        end_val = series.iloc[-1] if not series.empty else 100.0
+        end_positions.append({'idx': idx, 'name': sec_name, 'y': end_val, 'color': c})
+
+    # Ajuste de sobreposição dos números no fim da linha (right edge)
+    end_positions.sort(key=lambda item: item['y'])
+    adjusted_y = []
+    min_dist = 4.0
+    for item in end_positions:
+        cur_y = item['y']
+        if adjusted_y:
+            prev_y = adjusted_y[-1]
+            if cur_y - prev_y < min_dist:
+                cur_y = prev_y + min_dist
+        adjusted_y.append(cur_y)
+        item['y_adj'] = cur_y
+
+    x_end = full_dates[-1]
+    for item in end_positions:
+        ax1.text(x_end, item['y_adj'], f" [{item['idx']}]",
+                 color=item['color'], fontweight='bold', fontsize=8.5, va='center', ha='left', clip_on=False,
+                 bbox=dict(boxstyle='round,pad=0.15', facecolor='#1E293B', edgecolor=item['color'], lw=0.8, alpha=0.9))
 
     ax1.axhline(100, color=C_GRID, ls=':', lw=1.0, alpha=0.6)
-    ax1.set_title('Painel A — Fundamentos Operacionais: Evolução do EBITDA LTM (Base 100 = Jan/2021)',
+    ax1.set_title('Painel A — Fundamentos Operacionais: Evolução do EBITDA LTM por Setor (Base 100 = Jan/2021)',
                   fontsize=13, color=C_TEXT, pad=12, loc='left', fontweight='bold')
     ax1.set_ylabel('Índice (Base 100)', color=C_MUTED, fontsize=11, fontweight='bold')
     ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f"{int(x)}"))
@@ -900,8 +927,8 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     ax1.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b/%Y'))
 
-    leg1 = ax1.legend(frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, fontsize=10.0,
-                      loc='upper left', labelcolor='#E2E8F0', ncol=2, framealpha=0.95)
+    leg1 = ax1.legend(frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, fontsize=9.0,
+                      loc='upper left', labelcolor='#E2E8F0', ncol=3, framealpha=0.95)
     leg1.get_frame().set_linewidth(1.0)
 
     # ══════════════════════════════════════════════════════════════════
@@ -1093,11 +1120,12 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
     ax5.set_xticks(x_diff)
     ax5.set_xticklabels(diff_labels, fontsize=10.5, color=C_TEXT, fontweight='bold')
     ax5.set_ylabel('Difusão (% Empresas)', color=C_MUTED, fontsize=11, fontweight='bold')
-    ax5.set_ylim(0, 100)
+    ax5.set_ylim(0, 118)
 
     for i, bar in enumerate(bars5):
         y_val = bar.get_height()
-        ax5.text(bar.get_x() + bar.get_width()/2, y_val + 7, nk_texts[i],
+        box_y = y_val + ci_highs[i] + 4.5
+        ax5.text(bar.get_x() + bar.get_width()/2, box_y, nk_texts[i],
                  ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=C_TEXT,
                  bbox=dict(boxstyle='round,pad=0.3', facecolor=CARD, edgecolor=CARD_BORDER, lw=1.0))
 
@@ -1105,7 +1133,7 @@ def build_dashboard(results, output_path='bico_de_pato_dashboard.png'):
         ax5.spines[spine].set_visible(False)
     ax5.spines['bottom'].set_color(C_GRID)
     ax5.grid(True, ls='--', lw=0.5, color=C_GRID, alpha=0.4, axis='y')
-    ax5.legend(loc='upper right', frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, labelcolor='#E2E8F0')
+    ax5.legend(loc='lower right', frameon=True, facecolor=CARD, edgecolor=CARD_BORDER, labelcolor='#E2E8F0')
 
     # ══════════════════════════════════════════════════════════════════
     # ROW 6: PAINEL F — PERSISTÊNCIA TEMPORAL DA DIFUSÃO (NOVO)
